@@ -1,0 +1,79 @@
+/**
+ * Base tokens and reset.
+ *
+ * Sized for a 360 CSS-pixel viewport first (NFR-01). Touch targets are 44px
+ * minimum and focus is always visible (NFR-02).
+ */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f5f6f8;
+  --text: #16181d;
+  --muted: #5a6070;
+  --border: #d6d9e0;
+  --accent: #1d4ed8;
+  --pass: #15803d;
+  --fail: #b91c1c;
+  --warn: #a16207;
+
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111318;
+    --surface: #1b1e25;
+    --text: #f2f3f5;
+    --muted: #a2a8b8;
+    --border: #343945;
+    --accent: #7ba2ff;
+    --pass: #4ade80;
+    --fail: #f87171;
+    --warn: #fbbf24;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  /* Section 4: no horizontal scrolling at any supported width. */
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  min-height: 44px;
+}
+
+button {
+  min-width: 44px;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
