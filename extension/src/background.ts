@@ -10,7 +10,7 @@
 
 import type { ImageFormat } from '../../src/domain/types';
 import { imageToPdf } from './formatConvert';
-import { getUnlockedVault } from './profile';
+import { getUnlockedVault, type Profile, type ProfileFieldKey } from './profile';
 import { classifyFieldsWithVision, type VisionCandidate, type VisionResult } from './visionFallback';
 
 export interface VisionClassifyMessage {
@@ -29,6 +29,13 @@ export interface ConvertToPdfMessage {
 }
 
 export type ConvertToPdfResponse = { ok: true; pdfBlob: Blob } | { ok: false; error: string };
+
+export interface ResolveProfileMessage {
+  type: 'formready-resolve-profile-values';
+  keys: ProfileFieldKey[];
+}
+
+export type ResolveProfileResponse = { ok: true; values: Profile } | { ok: false; error: string };
 
 chrome.runtime.onMessage.addListener((message: VisionClassifyMessage, sender, sendResponse) => {
   if (message?.type !== 'formready-vision-classify') return undefined;
@@ -77,6 +84,36 @@ chrome.runtime.onMessage.addListener((message: ConvertToPdfMessage, _sender, sen
         ok: false,
         error: error instanceof Error ? error.message : String(error),
       } satisfies ConvertToPdfResponse);
+    }
+  })();
+
+  return true;
+});
+
+// The content script never receives the whole profile — only the values
+// for the specific keys it says it's about to fill, resolved here so the
+// decrypted vault stays confined to this privileged context.
+chrome.runtime.onMessage.addListener((message: ResolveProfileMessage, _sender, sendResponse) => {
+  if (message?.type !== 'formready-resolve-profile-values') return undefined;
+
+  (async (): Promise<void> => {
+    try {
+      const vault = await getUnlockedVault();
+      if (!vault) {
+        sendResponse({ ok: false, error: 'Vault is locked. Open the FormReady Autopilot icon to unlock it.' } satisfies ResolveProfileResponse);
+        return;
+      }
+      const values: Profile = {};
+      for (const key of message.keys) {
+        const value = vault.profile[key];
+        if (value) values[key] = value;
+      }
+      sendResponse({ ok: true, values } satisfies ResolveProfileResponse);
+    } catch (error) {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      } satisfies ResolveProfileResponse);
     }
   })();
 

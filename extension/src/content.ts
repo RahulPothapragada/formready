@@ -15,7 +15,19 @@ import { searchCandidates, type EncodeFn } from '../../src/features/preparation/
 import { decode, encode, readFormat, render } from '../../src/services/imageCodec';
 import { dataUrlToBlob, listVaultItems, type VaultItem } from './vault';
 import { fieldRequiresPdfConversion } from './formatConvertRule';
-import type { ConvertToPdfMessage, ConvertToPdfResponse } from './background';
+import type {
+  ConvertToPdfMessage,
+  ConvertToPdfResponse,
+  ResolveProfileMessage,
+  ResolveProfileResponse,
+  VisionClassifyMessage,
+  VisionClassifyResponse,
+} from './background';
+import { CONFIDENCE_THRESHOLD, classifyField, extractFieldSignals } from './fieldClassifier';
+import type { VisionCandidate } from './visionFallback';
+import { fillFieldSafely, fillSelectByBestMatch } from './reactSafeFill';
+import { showDraftOverlay, type DraftRow } from './draftOverlay';
+import type { Profile, ProfileFieldKey } from './profile';
 
 /**
  * PDF conversion runs in the background service worker, not here: pdf-lib
@@ -31,6 +43,14 @@ async function convertToPdfViaBackground(imageBlob: Blob, format: ImageFormat): 
 }
 
 const processed = new WeakSet<HTMLInputElement>();
+const processedForms = new WeakSet<Element>();
+
+interface FileMount {
+  kind: DocumentKind;
+  text: string;
+  ui: Mounted;
+}
+const fileInputMounts = new Map<HTMLInputElement, FileMount>();
 
 function isImageFileInput(input: HTMLInputElement): boolean {
   if (input.type !== 'file') return false;
@@ -322,8 +342,210 @@ function scan(root: ParentNode) {
     const text = collectNearbyText(input);
     const kind = guessKind(input, text);
     const ui = mountUI(input);
+    fileInputMounts.set(input, { kind, text, ui });
     ui.button.addEventListener('click', () => {
       void handleClick(input, kind, text, ui);
+    });
+  }
+
+  scanForms(root);
+}
+
+// --- Whole-form scan, classify, draft-review, and fill ---
+
+const FILLABLE_TEXT_SELECTOR =
+  'input[type="text"], input[type="tel"], input[type="email"], input[type="date"], input:not([type]), textarea, select';
+
+interface PlannedTextField {
+  id: string;
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+  fieldLabel: string;
+  profileKey: ProfileFieldKey;
+}
+
+interface PlannedFileField {
+  id: string;
+  input: HTMLInputElement;
+}
+
+function mountFormButton(form: Element): { button: HTMLButtonElement; status: HTMLDivElement } {
+  const host = document.createElement('span');
+  host.style.display = 'inline-block';
+  host.style.margin = '6px 0';
+  form.prepend(host);
+
+  const shadow = host.attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  style.textContent = STYLE;
+  shadow.appendChild(style);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'fr-btn';
+  button.textContent = '⚡ Fill this form';
+  shadow.appendChild(button);
+
+  const status = document.createElement('div');
+  status.className = 'fr-panel';
+  status.hidden = true;
+  shadow.appendChild(status);
+
+  return { button, status };
+}
+
+async function classifyFormFields(form: Element): Promise<PlannedTextField[]> {
+  const fields = Array.from(form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(FILLABLE_TEXT_SELECTOR));
+  const confident: PlannedTextField[] = [];
+  const lowConfidence: Array<{ id: string; field: (typeof fields)[number]; domGuess: ProfileFieldKey | null; label: string }> = [];
+
+  fields.forEach((field, index) => {
+    const id = `field-${index}`;
+    const signals = extractFieldSignals(field);
+    const classification = classifyField(signals);
+    const label = signals.label || signals.placeholder || signals.name || signals.id || '(unlabeled field)';
+    if (classification.fieldKey && classification.confidence >= CONFIDENCE_THRESHOLD) {
+      confident.push({ id, element: field, fieldLabel: label, profileKey: classification.fieldKey });
+    } else {
+      lowConfidence.push({ id, field, domGuess: classification.fieldKey, label });
+    }
+  });
+
+  if (lowConfidence.length > 0) {
+    try {
+      const candidates: VisionCandidate[] = lowConfidence.map((entry) => ({
+        fieldId: entry.id,
+        domGuess: entry.domGuess,
+        label: entry.label,
+      }));
+      const message: VisionClassifyMessage = { type: 'formready-vision-classify', candidates };
+      const response: VisionClassifyResponse = await chrome.runtime.sendMessage(message);
+      if (response.ok) {
+        const byId = new Map(response.results.map((result) => [result.fieldId, result]));
+        for (const entry of lowConfidence) {
+          const result = byId.get(entry.id);
+          if (result?.confirmedType && result.confidence >= CONFIDENCE_THRESHOLD) {
+            confident.push({ id: entry.id, element: entry.field, fieldLabel: entry.label, profileKey: result.confirmedType });
+          }
+        }
+      }
+    } catch {
+      // No API key, offline, or the call failed — those fields are simply left unfilled.
+    }
+  }
+
+  return confident;
+}
+
+async function resolveProfileValues(keys: ProfileFieldKey[]): Promise<Profile> {
+  const message: ResolveProfileMessage = { type: 'formready-resolve-profile-values', keys };
+  const response: ResolveProfileResponse = await chrome.runtime.sendMessage(message);
+  return response.ok ? response.values : {};
+}
+
+async function handleFillForm(form: Element, status: HTMLDivElement, button: HTMLButtonElement) {
+  button.disabled = true;
+  status.hidden = false;
+  status.innerHTML = '<h4>Reading this form…</h4>';
+
+  try {
+    const plannedText = await classifyFormFields(form);
+    const uniqueKeys = [...new Set(plannedText.map((field) => field.profileKey))];
+    const values = await resolveProfileValues(uniqueKeys);
+
+    const fileInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="file"]')).filter((input) =>
+      fileInputMounts.has(input),
+    );
+    const vaultItems = fileInputs.length > 0 ? await listVaultItems() : [];
+
+    const rows: DraftRow[] = [];
+    const textFieldById = new Map<string, PlannedTextField>();
+    for (const field of plannedText) {
+      const value = values[field.profileKey];
+      if (!value) continue;
+      textFieldById.set(field.id, field);
+      rows.push({
+        id: field.id,
+        fieldLabel: field.fieldLabel,
+        kind: field.element instanceof HTMLSelectElement ? 'select' : 'text',
+        profileKey: field.profileKey,
+        previewValue: value,
+        sensitive: field.profileKey === 'aadhaar' || field.profileKey === 'pan',
+      });
+    }
+
+    const fileFieldById = new Map<string, PlannedFileField>();
+    fileInputs.forEach((input, index) => {
+      const mount = fileInputMounts.get(input);
+      if (!mount) return;
+      const preferred = vaultItems.filter((item) => item.kind === mount.kind);
+      const candidate = (preferred.length > 0 ? preferred : vaultItems)[0];
+      if (!candidate) return;
+      const id = `file-${index}`;
+      fileFieldById.set(id, { id, input });
+      rows.push({
+        id,
+        fieldLabel: `${mount.kind === 'other' ? 'File' : mount.kind} field`,
+        kind: 'file',
+        profileKey: null,
+        previewValue: candidate.label,
+        sensitive: false,
+      });
+    });
+
+    status.hidden = true;
+    const result = await showDraftOverlay(rows);
+    if (!result.confirmed) {
+      status.hidden = false;
+      status.innerHTML = '<div class="fr-note">Cancelled — nothing was filled.</div>';
+      return;
+    }
+
+    let filledCount = 0;
+    for (const row of rows) {
+      if (result.excludedIds.has(row.id)) continue;
+      const textField = textFieldById.get(row.id);
+      if (textField) {
+        if (textField.element instanceof HTMLSelectElement) {
+          if (fillSelectByBestMatch(textField.element, row.previewValue)) filledCount += 1;
+        } else {
+          fillFieldSafely(textField.element, row.previewValue);
+          filledCount += 1;
+        }
+        continue;
+      }
+      const fileField = fileFieldById.get(row.id);
+      if (fileField) {
+        const mount = fileInputMounts.get(fileField.input);
+        const preferred = vaultItems.filter((item) => item.kind === mount?.kind);
+        const candidate = (preferred.length > 0 ? preferred : vaultItems)[0];
+        if (mount && candidate) {
+          await runPipeline(fileField.input, mount.kind, mount.text, candidate, mount.ui.panel, mount.ui.button);
+          filledCount += 1;
+        }
+      }
+    }
+
+    status.hidden = false;
+    status.innerHTML = `<div class="fr-note fr-ok">Filled ${filledCount} of ${rows.length} field${rows.length === 1 ? '' : 's'}.</div>`;
+  } catch (error) {
+    status.hidden = false;
+    status.innerHTML = `<h4 class="fr-fail">Something went wrong</h4><div>${error instanceof Error ? error.message : String(error)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function scanForms(root: ParentNode) {
+  const forms = root instanceof Element && root.matches('form') ? [root] : Array.from(root.querySelectorAll('form'));
+  for (const form of forms) {
+    if (processedForms.has(form)) continue;
+    const hasFillable = form.querySelector(`${FILLABLE_TEXT_SELECTOR}, input[type="file"]`);
+    if (!hasFillable) continue;
+    processedForms.add(form);
+
+    const { button, status } = mountFormButton(form);
+    button.addEventListener('click', () => {
+      void handleFillForm(form, status, button);
     });
   }
 }
