@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractRules } from '../src/features/requirements/extractRules';
-import type { FileSizeRule } from '../src/domain/types';
+import type { DimensionRule, FileSizeRule } from '../src/domain/types';
 
 const options = { sourceId: 'src-1', documentKind: 'photo' as const };
 
@@ -55,6 +55,26 @@ describe('dimensions', () => {
   it('applies a stated minimum to the pair', () => {
     const rules = extractRules('Minimum 350 x 350 pixels', options).rules;
     expect(rules.find((rule) => rule.field === 'width')).toMatchObject({ operator: 'gte' });
+  });
+
+  it('reads "between AxB and CxD" as a min/max box, not two exact sizes', () => {
+    const rules = extractRules('Dimensions should be between 200 x 230 and 300 x 350 pixels', options).rules;
+    const widths = rules.filter(
+      (rule): rule is DimensionRule => rule.field === 'width',
+    );
+    const heights = rules.filter(
+      (rule): rule is DimensionRule => rule.field === 'height',
+    );
+
+    // Two exact-equality rules on the same axis (200 and 300) would make the
+    // requirement unsatisfiable — that used to be exactly what happened here.
+    expect(widths).toHaveLength(2);
+    expect(heights).toHaveLength(2);
+    expect(widths.map((rule) => rule.operator).sort()).toEqual(['gte', 'lte']);
+    expect(widths.find((rule) => rule.operator === 'gte')).toMatchObject({ value: 200 });
+    expect(widths.find((rule) => rule.operator === 'lte')).toMatchObject({ value: 300 });
+    expect(heights.find((rule) => rule.operator === 'gte')).toMatchObject({ value: 230 });
+    expect(heights.find((rule) => rule.operator === 'lte')).toMatchObject({ value: 350 });
   });
 });
 

@@ -23,7 +23,8 @@
     "verify:journey:dev": "node scripts/verify-journey.mjs --dev",
     "extension:build": "node extension/build.mjs",
     "extension:typecheck": "tsc --noEmit -p extension/tsconfig.json",
-    "extension:demo-portals": "npx --yes serve extension/demo-portals -l 4321"
+    "extension:demo-portals": "npx --yes serve extension/demo-portals -l 4321",
+    "verify:extension": "node scripts/verify-extension.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

@@ -7,6 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const entries = [
   { in: resolve(here, 'src/content.ts'), out: resolve(here, 'dist/content.js') },
   { in: resolve(here, 'src/popup.ts'), out: resolve(here, 'dist/popup.js') },
+  { in: resolve(here, 'src/background.ts'), out: resolve(here, 'dist/background.js') },
 ];
 
 for (const entry of entries) {

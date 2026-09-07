@@ -15,12 +15,21 @@
   },
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "dist/background.js"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["dist/content.js"],
       "run_at": "document_idle",
       "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "dist/*", "icons/*"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

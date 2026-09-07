@@ -330,9 +330,87 @@ function extractDimensionRules(
 
   const pairPattern = /(\d{2,5})\s*[x×*]\s*(\d{2,5})\s*(px|pixels?)?/gi;
 
+  // "between 200 x 230 and 300 x 350 pixels" states a min/max box, not two
+  // exact sizes. Without this, each pair below is read as its own `eq` rule
+  // and the two conflict — a genuine requirement becomes a false "these
+  // requirements contradict each other" (FR-05 exists to catch real
+  // conflicts, not ones this parser invented).
+  const dimensionRangePattern = new RegExp(
+    '(?:between\\s+)?(\\d{2,5})\\s*[x×*]\\s*(\\d{2,5})\\s*(?:to|–|—|-|and)\\s*(\\d{2,5})\\s*[x×*]\\s*(\\d{2,5})\\s*(px|pixels?)?',
+    'gi',
+  );
+
   for (const clause of clauses) {
+    const consumed: Array<[number, number]> = [];
+
+    for (const match of clause.text.matchAll(dimensionRangePattern)) {
+      const localStart = match.index!;
+      const localEnd = localStart + match[0].length;
+      const trailing = clause.text.slice(localEnd);
+      consumed.push([localStart, localEnd]);
+
+      if (PHYSICAL_UNIT.test(trailing)) {
+        ambiguities.push({
+          text: `${match[0]}${trailing.slice(0, 4).trimEnd()}`,
+          reason:
+            'These are physical dimensions, not pixels. FormReady cannot convert them without a DPI value — check this one yourself.',
+          sourceSpan: span(options.sourceId, text, clause.offset + localStart, clause.offset + localEnd),
+        });
+        continue;
+      }
+
+      const evidence = span(
+        options.sourceId,
+        text,
+        clause.offset + localStart,
+        clause.offset + localEnd,
+      );
+      if (!match[5]) {
+        ambiguities.push({
+          text: match[0],
+          reason: 'No unit was given for these dimensions. They are assumed to be pixels.',
+          sourceSpan: evidence,
+        });
+      }
+
+      const [w1, h1, w2, h2] = [match[1], match[2], match[3], match[4]].map(Number);
+      for (const [axis, lo, hi] of [
+        ['width', Math.min(w1, w2), Math.max(w1, w2)],
+        ['height', Math.min(h1, h2), Math.max(h1, h2)],
+      ] as const) {
+        scoped.push({
+          subject: clause.subject,
+          rule: {
+            id: options.makeId(`${axis}-min`, index),
+            field: axis,
+            operator: 'gte',
+            value: lo,
+            unit: 'px',
+            origin: 'extracted',
+            reviewState: 'proposed',
+            sourceSpan: evidence,
+          },
+        });
+        scoped.push({
+          subject: clause.subject,
+          rule: {
+            id: options.makeId(`${axis}-max`, index),
+            field: axis,
+            operator: 'lte',
+            value: hi,
+            unit: 'px',
+            origin: 'extracted',
+            reviewState: 'proposed',
+            sourceSpan: evidence,
+          },
+        });
+      }
+      index += 1;
+    }
+
     for (const match of clause.text.matchAll(pairPattern)) {
       const localStart = match.index!;
+      if (consumed.some(([from, to]) => localStart >= from && localStart < to)) continue;
       const localEnd = localStart + match[0].length;
       const trailing = clause.text.slice(localEnd);
 
