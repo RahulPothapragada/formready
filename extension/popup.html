@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FormReady Autopilot</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 16px;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        color: #1a1a1a;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 2px;
+      }
+      p.tagline {
+        font-size: 12px;
+        color: #555;
+        margin: 0 0 14px;
+      }
+      .item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        border: 1px solid #e2e2e2;
+        border-radius: 8px;
+        margin-bottom: 8px;
+      }
+      .item img {
+        width: 40px;
+        height: 40px;
+        object-fit: cover;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+        background: #fafafa;
+      }
+      .item .meta {
+        flex: 1;
+        min-width: 0;
+      }
+      .item .meta .label {
+        font-size: 13px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .item .meta .kind {
+        font-size: 11px;
+        color: #777;
+        text-transform: capitalize;
+      }
+      .item button {
+        border: none;
+        background: none;
+        color: #b3261e;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      #empty {
+        font-size: 12px;
+        color: #777;
+        padding: 12px 0;
+        text-align: center;
+      }
+      form#add {
+        border-top: 1px solid #eee;
+        margin-top: 10px;
+        padding-top: 12px;
+        display: grid;
+        gap: 8px;
+      }
+      form#add input[type='text'], form#add select {
+        padding: 6px 8px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      form#add button {
+        background: #1d4ed8;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .footnote {
+        font-size: 10px;
+        color: #999;
+        margin-top: 10px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>FormReady Autopilot</h1>
+    <p class="tagline">Your document vault. Saved once, stays on this device.</p>
+    <div id="list"></div>
+    <div id="empty" hidden>No documents saved yet.</div>
+    <form id="add">
+      <input type="text" id="label" placeholder="Label, e.g. Passport photo" required />
+      <select id="kind">
+        <option value="photo">Photo</option>
+        <option value="signature">Signature</option>
+        <option value="other">Other</option>
+      </select>
+      <input type="file" id="file" accept="image/jpeg,image/png" required />
+      <button type="submit">Save to vault</button>
+    </form>
+    <p class="footnote">
+      Stored in this browser profile only, via chrome.storage.local. Nothing here is uploaded to
+      any server — that's what makes "attach compliant file" safe to do automatically.
+    </p>
+    <script src="dist/popup.js"></script>
+  </body>
+</html>

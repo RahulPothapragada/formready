@@ -20,7 +20,10 @@
     "verify:browser": "node scripts/verify-in-browser.mjs",
     "verify:offline": "node scripts/verify-in-browser.mjs --offline",
     "verify:journey": "node scripts/verify-journey.mjs",
-    "verify:journey:dev": "node scripts/verify-journey.mjs --dev"
+    "verify:journey:dev": "node scripts/verify-journey.mjs --dev",
+    "extension:build": "node extension/build.mjs",
+    "extension:typecheck": "tsc --noEmit -p extension/tsconfig.json",
+    "extension:demo-portals": "npx --yes serve extension/demo-portals -l 4321"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -30,10 +33,12 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@types/chrome": "^0.2.9",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "esbuild": "^0.28.2",
     "jsdom": "^29.1.1",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",

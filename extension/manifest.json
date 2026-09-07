@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "FormReady Autopilot",
+  "version": "0.1.0",
+  "description": "One click, on device: prepares your photo or signature to match whatever a form asks for, and attaches it directly. Nothing you upload here ever leaves your device.",
+  "icons": {
+    "192": "icons/icon-192.png",
+    "512": "icons/icon-512.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "192": "icons/icon-192.png"
+    }
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}
