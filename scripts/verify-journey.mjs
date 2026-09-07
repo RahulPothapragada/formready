@@ -323,10 +323,12 @@ async function runJourney(page, downloadDir) {
   }
   record('Crop frame responds to dragging', `moved to x=${moved[0]} · ${before.trim()}`);
 
-  if (!(await page.evaluate(clickByText('Use the whole image')))) {
+  // "Use this crop", not the whole image: this is what proves the worker plans
+  // output geometry from the cropped region rather than the full picture.
+  if (!(await page.evaluate(clickByText('Use this crop')))) {
     throw new Error('Could not approve the framing.');
   }
-  record('Approved framing');
+  record('Approved the cropped region');
 
   // Reload before preparing. Persistence is worth nothing unless the work
   // survives the thing it exists to survive.
@@ -354,10 +356,17 @@ async function runJourney(page, downloadDir) {
   }
   record('Work survived a reload', `${survived.rules} rules · ${survived.dimensions}`);
 
-  // Re-approve framing on the restored job and carry on.
-  if (!(await page.evaluate(clickByText('Use the whole image')))) {
+  // Re-approve the same crop on the restored job and carry on.
+  await page.evaluate(`document.querySelector('.crop-precise').open = true; true`);
+  await page.evaluate(setControlled('.crop-fields label:nth-child(3) input', String(moved[2])));
+  await sleep(200);
+  const restoredCrop = await page.evaluate(`
+    [...document.querySelectorAll('.crop-fields input')].map((i) => Number(i.value))`);
+  if (!(await page.evaluate(clickByText('Use this crop')))) {
     throw new Error('Could not approve framing after the reload.');
   }
+  moved[2] = restoredCrop[2];
+  moved[3] = restoredCrop[3];
 
   // Preparation runs in the worker; the app navigates to review on success.
   await waitFor(
@@ -385,6 +394,25 @@ async function runJourney(page, downloadDir) {
   for (const check of checks) console.log(`      ${check.text}`);
   record(`All ${checks.length} exact checks passed`);
 
+  // The output must keep the shape of the approved crop. Comparing ratios
+  // catches a stretch that byte count and format checks cannot see.
+  const shape = await page.evaluate(`
+    (() => {
+      const dd = [...document.querySelectorAll('.metadata dd')].map((d) => d.innerText);
+      const match = (dd.find((t) => t.includes('pixels')) ?? '').match(/(\\d+)\\s*×\\s*(\\d+)/);
+      return match ? { width: +match[1], height: +match[2] } : null;
+    })()`);
+  if (!shape) throw new Error('The review screen did not report output dimensions.');
+
+  const approvedRatio = moved[2] / moved[3];
+  const outputRatio = shape.width / shape.height;
+  if (Math.abs(outputRatio - approvedRatio) / approvedRatio > 0.02) {
+    throw new Error(
+      `Output was distorted: approved ${moved[2]}x${moved[3]} (${approvedRatio.toFixed(3)}) but produced ${shape.width}x${shape.height} (${outputRatio.toFixed(3)}).`,
+    );
+  }
+  record('Output kept the approved shape', `${shape.width}x${shape.height}`);
+
   // Download must stay disabled until the visual review is acknowledged.
   const blockedBeforeReview = await page.evaluate(`
     [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Download file'))?.disabled === true`);
@@ -395,6 +423,22 @@ async function runJourney(page, downloadDir) {
 
   await page.evaluate(`document.querySelector('.visual-review input').click(); true`);
   await sleep(300);
+
+  // Each manual requirement is acknowledged on its own, so the visual-review
+  // tick alone must not be enough to open export.
+  const manualCount = await page.evaluate(`document.querySelectorAll('.manual-ack input').length`);
+  if (manualCount > 0) {
+    const stillBlocked = await page.evaluate(`
+      [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Download file'))?.disabled === true`);
+    if (!stillBlocked) {
+      throw new Error('One tick acknowledged manual requirements it says nothing about.');
+    }
+    await page.evaluate(`
+      document.querySelectorAll('.manual-ack input').forEach((box) => { if (!box.checked) box.click(); });
+      true`);
+    await sleep(300);
+    record(`Acknowledged ${manualCount} manual requirement(s) individually`);
+  }
 
   await page.send('Browser.setDownloadBehavior', {
     behavior: 'allow',

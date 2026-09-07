@@ -3,6 +3,9 @@ import type { ManualCheck, ValidationReport } from '../../domain/types';
 interface ValidationChecklistProps {
   report: ValidationReport;
   manualChecks: ManualCheck[];
+  /** Ids of the manual requirements the user has confirmed individually. */
+  acknowledged: string[];
+  onAcknowledge: (id: string, checked: boolean) => void;
 }
 
 const OUTCOME_LABEL = {
@@ -27,7 +30,12 @@ const FIELD_LABEL = {
  * is recent. Merging them into one "all requirements passed" would claim
  * verification the app has not performed.
  */
-export default function ValidationChecklist({ report, manualChecks }: ValidationChecklistProps) {
+export default function ValidationChecklist({
+  report,
+  manualChecks,
+  acknowledged,
+  onAcknowledge,
+}: ValidationChecklistProps) {
   return (
     <>
       <section className="checklist exact">
@@ -47,10 +55,21 @@ export default function ValidationChecklist({ report, manualChecks }: Validation
       {manualChecks.length > 0 ? (
         <section className="checklist manual">
           <h3>What you need to check yourself</h3>
-          <p className="hint">FormReady cannot verify these from the file.</p>
+          <p className="hint">
+            FormReady cannot verify these from the file. Confirm each one you have checked.
+          </p>
           <ul>
             {manualChecks.map((check) => (
-              <li key={check.id}>{check.text}</li>
+              <li key={check.id} className={acknowledged.includes(check.id) ? 'pass' : ''}>
+                <label className="manual-ack">
+                  <input
+                    type="checkbox"
+                    checked={acknowledged.includes(check.id)}
+                    onChange={(event) => onAcknowledge(check.id, event.target.checked)}
+                  />
+                  <span>{check.text}</span>
+                </label>
+              </li>
             ))}
           </ul>
         </section>

@@ -199,3 +199,49 @@ describe('rounding', () => {
     expect(tiny.height).toBeGreaterThanOrEqual(1);
   });
 });
+
+/**
+ * Aspect must hold through every editing path, not only the drag handles.
+ * Clamping each axis to its own limit changed the ratio, and the output was
+ * then stretched to fit — the silent distortion FR-07 forbids.
+ */
+describe('aspect survives every path', () => {
+  const bounds = { width: 1200, height: 800 };
+  const ratio = (crop: { width: number; height: number }) => crop.width / crop.height;
+
+  it('keeps the ratio when a pinch would overflow the image', () => {
+    const start = { x: 0, y: 0, width: 600, height: 800 };
+    const grown = scaleAboutCentre(start, 2, bounds, ratio(start));
+    expect(ratio(grown)).toBeCloseTo(ratio(start), 4);
+  });
+
+  it('keeps the ratio when clamping an oversized rectangle', () => {
+    const clamped = clampCrop({ x: 0, y: 0, width: 2400, height: 1600 }, bounds, 1.5);
+    expect(ratio(clamped)).toBeCloseTo(1.5, 4);
+    expect(clamped.width).toBeLessThanOrEqual(bounds.width);
+    expect(clamped.height).toBeLessThanOrEqual(bounds.height);
+  });
+
+  it('keeps the ratio when one axis alone is edited numerically', () => {
+    const edited = clampCrop({ x: 0, y: 0, width: 900, height: 400 }, bounds, 0.75);
+    expect(ratio(edited)).toBeCloseTo(0.75, 4);
+  });
+
+  it('stays inside the image after shaping', () => {
+    for (const aspect of [0.5, 0.75, 1, 1.5, 3]) {
+      const clamped = clampCrop({ x: 1100, y: 700, width: 900, height: 900 }, bounds, aspect);
+      expect(clamped.x + clamped.width).toBeLessThanOrEqual(bounds.width + 0.001);
+      expect(clamped.y + clamped.height).toBeLessThanOrEqual(bounds.height + 0.001);
+      expect(ratio(clamped)).toBeCloseTo(aspect, 4);
+    }
+  });
+
+  it('leaves free-form crops able to fill each axis independently', () => {
+    expect(clampCrop({ x: 0, y: 0, width: 2400, height: 1600 }, bounds)).toEqual({
+      x: 0,
+      y: 0,
+      width: 1200,
+      height: 800,
+    });
+  });
+});

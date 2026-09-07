@@ -104,3 +104,114 @@ describe('format', () => {
     expect(rule && 'allowed' in rule ? [...rule.allowed].sort() : []).toEqual(['jpeg', 'png']);
   });
 });
+
+/**
+ * Regressions from the review. Each of these previously produced a requirement
+ * that reversed or invented what the instructions said — the worst possible
+ * failure here, because everything downstream then verifies correctly against
+ * the wrong rule.
+ */
+describe('negation and clause scope', () => {
+  it('reads "not less than" as a minimum, not a maximum', () => {
+    const [rule] = sizeRules('File must be not less than 20 KB.');
+    expect(rule.operator).toBe('gte');
+    expect(rule.value).toBe(20);
+  });
+
+  it('reads "no more than" as a maximum', () => {
+    expect(sizeRules('File should be no more than 50 KB.')[0].operator).toBe('lte');
+  });
+
+  it('reads "not exceeding" as inclusive', () => {
+    expect(sizeRules('Size not exceeding 50 KB.')[0].operator).toBe('lte');
+  });
+
+  it('does not let a size qualifier reach across a comma into the dimensions', () => {
+    // "under" governs the file size only; the pixels are exact.
+    const rules = extractRules('JPEG under 50 KB, 200 x 230 pixels.', options).rules;
+    expect(rules.find((rule) => rule.field === 'fileSize')).toMatchObject({ operator: 'lt' });
+    expect(rules.find((rule) => rule.field === 'width')).toMatchObject({ operator: 'eq', value: 200 });
+    expect(rules.find((rule) => rule.field === 'height')).toMatchObject({ operator: 'eq', value: 230 });
+  });
+
+  it('keeps a comma inside a number from splitting the clause', () => {
+    expect(sizeRules('File must be under 20,000 bytes.')[0]).toMatchObject({
+      operator: 'lt',
+      value: 20000,
+      unit: 'B',
+    });
+  });
+});
+
+describe('physical dimensions', () => {
+  it('never reads millimetres as pixels', () => {
+    const { rules, ambiguities } = extractRules('Photograph must measure 35 x 45 mm.', options);
+    expect(rules.filter((rule) => rule.field === 'width' || rule.field === 'height')).toHaveLength(0);
+    expect(ambiguities.some((item) => /physical dimensions/i.test(item.reason))).toBe(true);
+  });
+
+  it('flags a bare pixel pair as an assumption rather than silently taking it', () => {
+    const { rules, ambiguities } = extractRules('Photo size 200 x 230.', options);
+    expect(rules.some((rule) => rule.field === 'width')).toBe(true);
+    expect(ambiguities.some((item) => /assumed to be pixels/i.test(item.reason))).toBe(true);
+  });
+});
+
+describe('prohibited formats', () => {
+  it('does not treat a forbidden format as permitted', () => {
+    const rule = extractRules('Only JPEG is accepted. PNG is not allowed.', options).rules.find(
+      (item) => item.field === 'format',
+    );
+    expect(rule && 'allowed' in rule ? rule.allowed : []).toEqual(['jpeg']);
+  });
+
+  it('honours "only" as exclusive', () => {
+    const rule = extractRules('Only PNG files are accepted.', options).rules.find(
+      (item) => item.field === 'format',
+    );
+    expect(rule && 'allowed' in rule ? rule.allowed : []).toEqual(['png']);
+  });
+
+  it('proposes nothing when every supported format is ruled out', () => {
+    const { rules, ambiguities } = extractRules('JPEG and PNG are not accepted.', options);
+    expect(rules.some((rule) => rule.field === 'format')).toBe(false);
+    expect(ambiguities.some((item) => /rule out every format/i.test(item.reason))).toBe(true);
+  });
+});
+
+describe('document attribution', () => {
+  const text = 'Photograph under 50 KB. Signature under 20 KB.';
+
+  it('proposes only the photograph limit when preparing a photograph', () => {
+    const rules = extractRules(text, { ...options, documentKind: 'photo' }).rules;
+    expect(rules.filter((rule) => rule.field === 'fileSize')).toHaveLength(1);
+    expect(rules.find((rule) => rule.field === 'fileSize')).toMatchObject({ value: 50 });
+  });
+
+  it('proposes only the signature limit when preparing a signature', () => {
+    const rules = extractRules(text, { ...options, documentKind: 'signature' }).rules;
+    expect(rules.filter((rule) => rule.field === 'fileSize')).toHaveLength(1);
+    expect(rules.find((rule) => rule.field === 'fileSize')).toMatchObject({ value: 20 });
+  });
+
+  it('says what it left out rather than dropping it silently', () => {
+    const { ambiguities } = extractRules(text, { ...options, documentKind: 'photo' });
+    expect(ambiguities.some((item) => /signature/i.test(item.reason))).toBe(true);
+  });
+
+  it('carries the named upload forward across following clauses', () => {
+    const rules = extractRules(
+      'Photograph must be JPEG. Size under 50 KB. Signature under 20 KB.',
+      { ...options, documentKind: 'photo' },
+    ).rules;
+    expect(rules.filter((rule) => rule.field === 'fileSize')).toHaveLength(1);
+    expect(rules.find((rule) => rule.field === 'fileSize')).toMatchObject({ value: 50 });
+  });
+
+  it('keeps unscoped rules for every document kind', () => {
+    for (const kind of ['photo', 'signature', 'printed', 'other'] as const) {
+      const rules = extractRules('File must be under 50 KB.', { ...options, documentKind: kind }).rules;
+      expect(rules).toHaveLength(1);
+    }
+  });
+});

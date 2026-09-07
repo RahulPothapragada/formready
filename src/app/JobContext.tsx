@@ -30,10 +30,14 @@ import { clearJob, isSupported, loadJob, saveJob } from '../services/jobStore';
 import type { Job } from '../domain/types';
 
 export type SaveState =
+  /** Nothing worth saving yet. */
   | { kind: 'idle' }
+  /** Edited since the last committed write — this is the honest default. */
+  | { kind: 'pending' }
   | { kind: 'saving' }
   | { kind: 'saved'; at: number }
-  | { kind: 'unavailable'; reason: string };
+  | { kind: 'unavailable'; reason: string }
+  | { kind: 'delete-failed'; reason: string };
 
 interface JobContextValue {
   job: Job;
@@ -41,6 +45,8 @@ interface JobContextValue {
   saveState: SaveState;
   /** Discards the job and everything stored for it. */
   discard: () => Promise<void>;
+  /** True once anything has been written for this job, even if a later save failed. */
+  hasStoredWork: boolean;
 }
 
 const JobContext = createContext<JobContextValue | null>(null);
@@ -56,7 +62,14 @@ export function JobProvider({ children }: { children: ReactNode }) {
       : { kind: 'unavailable', reason: 'This browser cannot save work locally.' },
   );
   const [hydrated, setHydrated] = useState(false);
+  const [hasStoredWork, setHasStoredWork] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The revision a completed write actually covers. A save that lands after the
+   * user has edited again must not report the newer work as saved, so the
+   * revision is captured when the write starts and checked when it finishes.
+   */
+  const savedRevision = useRef<number | null>(null);
 
   // Restore before the first render of the journey, so nobody sees an empty
   // form flash and assumes their work is gone.
@@ -64,7 +77,11 @@ export function JobProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     loadJob().then((restored) => {
       if (cancelled) return;
-      if (restored) dispatch({ type: 'RESTORE_JOB', job: restored });
+      if (restored) {
+        dispatch({ type: 'RESTORE_JOB', job: restored });
+        savedRevision.current = restored.revision;
+        setHasStoredWork(true);
+      }
       setHydrated(true);
     });
     return () => {
@@ -76,15 +93,29 @@ export function JobProvider({ children }: { children: ReactNode }) {
     if (!hydrated || !isSupported()) return;
     if (!isWorthSaving(job)) return;
 
+    // Say "not saved yet" from the moment of the edit. Leaving the previous
+    // "Saved" on screen through the debounce told the user their latest change
+    // was safe before anything had been written.
+    if (savedRevision.current !== job.revision) setSaveState({ kind: 'pending' });
+
     if (timer.current) clearTimeout(timer.current);
+    const revision = job.revision;
     timer.current = setTimeout(() => {
       setSaveState({ kind: 'saving' });
       saveJob(job, Date.now()).then((outcome) => {
-        setSaveState(
-          outcome.saved
-            ? { kind: 'saved', at: Date.now() }
-            : { kind: 'unavailable', reason: outcome.reason ?? 'Your work could not be saved.' },
-        );
+        if (outcome.saved) {
+          setHasStoredWork(true);
+          savedRevision.current = revision;
+          // A slower earlier write must not overwrite a newer verdict.
+          setSaveState((current) =>
+            current.kind === 'saving' ? { kind: 'saved', at: Date.now() } : current,
+          );
+          return;
+        }
+        setSaveState({
+          kind: 'unavailable',
+          reason: outcome.reason ?? 'Your work could not be saved.',
+        });
       });
     }, SAVE_DEBOUNCE_MS);
 
@@ -95,12 +126,25 @@ export function JobProvider({ children }: { children: ReactNode }) {
 
   const discard = useCallback(async () => {
     if (timer.current) clearTimeout(timer.current);
-    await clearJob();
+    const outcome = await clearJob();
+
+    if (!outcome.deleted) {
+      // The screen must keep matching the disk. Clearing the visible job while
+      // a snapshot survives would make it reappear on the next load.
+      setSaveState({ kind: 'delete-failed', reason: outcome.reason ?? 'Deletion failed.' });
+      return;
+    }
+
+    savedRevision.current = null;
+    setHasStoredWork(false);
     dispatch({ type: 'CLEAR_JOB', nextId: crypto.randomUUID() });
     setSaveState({ kind: 'idle' });
   }, []);
 
-  const value = useMemo(() => ({ job, dispatch, saveState, discard }), [job, saveState, discard]);
+  const value = useMemo(
+    () => ({ job, dispatch, saveState, discard, hasStoredWork }),
+    [job, saveState, discard, hasStoredWork],
+  );
 
   // Rendering the journey before the restore lands would let a page mount
   // against an empty job and immediately redirect away from restored work.

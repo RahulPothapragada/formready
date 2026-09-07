@@ -7,6 +7,7 @@ on:
 
 jobs:
   check:
+    name: Types, lint, unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,10 +25,62 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Deterministic suites only. Browser-dependent paths (decode, render,
-      # encode, download) need a real device and are verified by hand.
       - name: Test
         run: npm test
 
       - name: Build
         run: npm run build
+
+  browser:
+    # A green build proves the bundle compiled, not that OCR reads anything, an
+    # image renders, or work survives a reload. None of that can run in Node, so
+    # it runs in a real browser here. This is desktop automation — it is not a
+    # substitute for the phone, which measures different numbers.
+    name: Browser journey and offline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+
+      - name: Fetch OCR assets and generate icons
+        # The offline check must fail loudly if an asset is missing rather than
+        # quietly reporting OCR as "skipped".
+        run: npm run setup
+
+      - name: Confirm the OCR assets are actually present
+        run: |
+          set -euo pipefail
+          for file in worker.min.js tesseract-core-simd-lstm.wasm.js lang/eng.traineddata; do
+            test -s "public/models/tesseract/$file" \
+              || { echo "Missing OCR asset: $file"; exit 1; }
+          done
+
+      - name: Build
+        run: npm run build
+
+      - name: Full journey (production build)
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run verify:journey
+
+      - name: Full journey (dev server, React Strict Mode)
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run verify:journey:dev
+
+      - name: Offline and device probes
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: npm run verify:offline

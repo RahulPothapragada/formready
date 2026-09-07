@@ -7,7 +7,6 @@ import {
   scaleAboutCentre,
   visualCropToSource,
   visualSize,
-  withAspect,
   type Handle,
   type Rotation,
 } from './cropGeometry';
@@ -121,7 +120,7 @@ export default function CropEditor({
     if (active.kind === 'pinch') {
       const current = spread();
       if (active.startSpread > 0 && current > 0) {
-        setCrop(scaleAboutCentre(active.startCrop, active.startSpread / current, bounds));
+        setCrop(scaleAboutCentre(active.startCrop, active.startSpread / current, bounds, requiredAspect));
       }
       return;
     }
@@ -137,6 +136,7 @@ export default function CropEditor({
             y: active.startCrop.y + (point.y - active.startY),
           },
           bounds,
+          requiredAspect,
         ),
       );
       return;
@@ -169,19 +169,23 @@ export default function CropEditor({
 
     setCrop((current) => {
       if (!event.shiftKey) {
-        return clampCrop({ ...current, x: current.x + delta[0], y: current.y + delta[1] }, bounds);
+        return clampCrop(
+          { ...current, x: current.x + delta[0], y: current.y + delta[1] },
+          bounds,
+          requiredAspect,
+        );
       }
       const resized = { ...current, width: current.width + delta[0], height: current.height + delta[1] };
-      return clampCrop(
-        requiredAspect === null ? resized : withAspect(resized, requiredAspect),
-        bounds,
-      );
+      return clampCrop(resized, bounds, requiredAspect);
     });
   };
 
   const setField = (key: keyof CropRect, value: number) => {
-    if (!Number.isFinite(value)) return;
-    setCrop((current) => clampCrop({ ...current, [key]: value }, bounds));
+    // The numeric fields are an editing path like any other, so they go through
+    // the same aspect-aware clamp. Letting them write a raw value was a way to
+    // step outside the lock the drag handles enforce.
+    if (!Number.isFinite(value) || value < 0) return;
+    setCrop((current) => clampCrop({ ...current, [key]: value }, bounds, requiredAspect));
   };
 
   const rounded = roundCrop(crop);

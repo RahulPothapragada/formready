@@ -44,6 +44,16 @@ function open(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * Runs one request and resolves only when its transaction *commits*.
+ *
+ * A request firing `onsuccess` means the write was accepted, not that it
+ * reached disk: the transaction can still abort afterwards, on quota or on a
+ * failure elsewhere in it. Resolving on request success reported work as saved
+ * that was then rolled back — the one thing persistence must never do.
+ *
+ * Reads resolve on completion too; it costs nothing and keeps one code path.
+ */
 function run<T>(
   mode: IDBTransactionMode,
   action: (store: IDBObjectStore) => IDBRequest<T>,
@@ -53,9 +63,21 @@ function run<T>(
       new Promise<T>((resolve, reject) => {
         const transaction = db.transaction(STORE, mode);
         const request = action(transaction.objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-        transaction.onabort = () => reject(transaction.error);
+        let result: T;
+
+        request.onsuccess = () => {
+          result = request.result;
+        };
+        request.onerror = (event) => {
+          // Stop the request error from aborting the transaction twice over.
+          event.preventDefault();
+          reject(request.error ?? new Error('The stored job could not be written.'));
+        };
+        transaction.oncomplete = () => resolve(result);
+        transaction.onabort = () =>
+          reject(transaction.error ?? new Error('The write was rolled back.'));
+        transaction.onerror = () =>
+          reject(transaction.error ?? new Error('The write failed.'));
       }),
   );
 }
@@ -98,11 +120,28 @@ export async function loadJob(): Promise<Job | null> {
   }
 }
 
-export async function clearJob(): Promise<void> {
-  if (!isSupported()) return;
+export interface DeleteOutcome {
+  deleted: boolean;
+  reason?: string;
+}
+
+/**
+ * Removes the stored job, reporting whether it actually went.
+ *
+ * This used to swallow failures and resolve as though it had worked. The user
+ * would then see the job disappear from the screen while an older snapshot
+ * stayed on disk and came back on the next load — the app quietly failing to
+ * honour a delete is worse than telling them it could not.
+ */
+export async function clearJob(): Promise<DeleteOutcome> {
+  if (!isSupported()) return { deleted: true };
   try {
     await run('readwrite', (store) => store.delete(CURRENT_KEY));
+    return { deleted: true };
   } catch {
-    // Nothing useful to do: the caller is discarding the job either way.
+    return {
+      deleted: false,
+      reason: 'Your saved work could not be deleted from this device. Try again.',
+    };
   }
 }

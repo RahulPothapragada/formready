@@ -48,20 +48,33 @@ export default function ReviewPage() {
 
   const filename = buildFilename(job.candidate, job.confirmed.documentKind, String(job.revision));
   const reviewed = job.review?.visuallyReviewed ?? false;
+  const acknowledged = job.review?.acknowledgedManualCheckIds ?? [];
   const ready = canExport(job);
 
-  const setReviewed = (checked: boolean) => {
+  /**
+   * Each manual requirement is acknowledged on its own.
+   *
+   * One tick saying the document is readable used to acknowledge every manual
+   * check, including things it says nothing about — background colour,
+   * photograph recency, ink colour. Confirming a requirement the user was never
+   * shown is the same overclaiming the exact/manual split exists to prevent.
+   */
+  const updateReview = (next: { reviewed?: boolean; checkIds?: string[] }) => {
     dispatch({
       type: 'SET_USER_REVIEW',
       review: {
         candidateId: job.candidate!.id,
         jobRevision: job.revision,
-        visuallyReviewed: checked,
-        acknowledgedManualCheckIds: checked
-          ? job.confirmed!.manualChecks.map((check) => check.id)
-          : [],
+        visuallyReviewed: next.reviewed ?? reviewed,
+        acknowledgedManualCheckIds: next.checkIds ?? acknowledged,
         reviewedAt: Date.now(),
       },
+    });
+  };
+
+  const toggleManualCheck = (id: string, checked: boolean) => {
+    updateReview({
+      checkIds: checked ? [...new Set([...acknowledged, id])] : acknowledged.filter((item) => item !== id),
     });
   };
 
@@ -118,10 +131,19 @@ export default function ReviewPage() {
         </dd>
       </dl>
 
-      <ValidationChecklist report={job.report} manualChecks={job.confirmed.manualChecks} />
+      <ValidationChecklist
+        report={job.report}
+        manualChecks={job.confirmed.manualChecks}
+        acknowledged={acknowledged}
+        onAcknowledge={toggleManualCheck}
+      />
 
       <label className="visual-review">
-        <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} />
+        <input
+          type="checkbox"
+          checked={reviewed}
+          onChange={(event) => updateReview({ reviewed: event.target.checked })}
+        />
         I checked that the document is readable and nothing important is missing.
       </label>
 

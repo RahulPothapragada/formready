@@ -22,6 +22,7 @@ import type {
   FormatRule,
   ImageFormat,
   Rule,
+  RuleField,
   RuleResult,
   SizeUnit,
   ValidationReport,
@@ -110,6 +111,43 @@ export function isImpossible(bounds: Bounds): boolean {
   return bounds.min !== null && bounds.max !== null && bounds.min > bounds.max;
 }
 
+/**
+ * Largest output dimension the app will accept as a requirement.
+ *
+ * A rule asking for 500,000 pixels is not a requirement anyone can meet; it is
+ * an allocation that fails. Bounding it here keeps an impossible number out of
+ * the encoder rather than letting it become an out-of-memory crash.
+ */
+export const MAX_OUTPUT_DIMENSION = 20000;
+
+/**
+ * Is a rule usable as an executable requirement?
+ *
+ * Empty numeric fields read back as `Number('') === 0`, and the `min` attribute
+ * on an input does not stop a value reaching state in a button-driven form. So
+ * validity is decided here, where every path — extraction, manual entry, and
+ * editing — has to pass through it.
+ */
+export function isUsableRule(rule: Rule): boolean {
+  if (rule.field === 'format') return rule.allowed.length > 0;
+  if (!Number.isFinite(rule.value) || rule.value <= 0) return false;
+  if (rule.field === 'width' || rule.field === 'height') {
+    return Number.isInteger(rule.value) && rule.value <= MAX_OUTPUT_DIMENSION;
+  }
+  return true;
+}
+
+/** Why a rule cannot be used, for the editor to show against the field. */
+export function ruleProblem(rule: Rule): string | null {
+  if (isUsableRule(rule)) return null;
+  if (rule.field === 'format') return 'Choose at least one format.';
+  if (!Number.isFinite(rule.value) || rule.value <= 0) {
+    return 'Enter a number greater than zero.';
+  }
+  if (!Number.isInteger(rule.value)) return 'Pixels must be a whole number.';
+  return `Enter ${MAX_OUTPUT_DIMENSION.toLocaleString('en-US')} pixels or fewer.`;
+}
+
 /** Only rules the user actually confirmed take part in exact checking. */
 function confirmedOnly(rules: Rule[]): Rule[] {
   return rules.filter((rule) => rule.reviewState === 'confirmed');
@@ -155,12 +193,31 @@ export interface Conflict {
   message: string;
 }
 
+const FIELD_LABEL: Record<RuleField, string> = {
+  format: 'File format',
+  fileSize: 'File size',
+  width: 'Width',
+  height: 'Height',
+};
+
 /**
  * Contradictions that must block confirmation (FR-05). These are structural
  * impossibilities in the rule set itself, found before any file is touched.
  */
 export function findConflicts(rules: Rule[], convention: ByteConvention): Conflict[] {
   const conflicts: Conflict[] = [];
+
+  // An unusable value blocks confirmation before any interval arithmetic: a
+  // zero-pixel width is not a narrow requirement, it is a broken one.
+  for (const rule of confirmedOnly(rules)) {
+    const problem = ruleProblem(rule);
+    if (problem) {
+      conflicts.push({
+        field: rule.field,
+        message: `${FIELD_LABEL[rule.field]}: ${problem}`,
+      });
+    }
+  }
 
   const size = sizeBounds(rules, convention);
   if (isImpossible(size)) {

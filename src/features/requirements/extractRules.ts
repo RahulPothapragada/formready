@@ -1,12 +1,17 @@
 /**
  * Pattern-based extraction of supported constraints from instruction text.
  *
- * Every rule this produces carries the exact character span it came from, so
- * the requirements screen can highlight the supporting phrase (FR-03). A number
- * that cannot be tied back to a span is not emitted — the user is asked for it
- * instead. Nothing here invents a limit that the text did not state.
+ * Every rule carries the exact character span it came from, so the requirements
+ * screen can highlight the supporting phrase (FR-03). Nothing here invents a
+ * limit the text did not state, and everything is emitted as `proposed` —
+ * confirmation is a separate, explicit user act.
  *
- * Output is always `proposed`. Confirmation is a separate, explicit user act.
+ * Parsing is **clause by clause** rather than by scanning a fixed window of
+ * characters before each number. A window is wrong in ways that quietly reverse
+ * meaning: "under 50 KB, 200 x 230 pixels" let the size qualifier reach across
+ * a comma and turn the dimensions into maximums, and "not less than 20 KB"
+ * matched the "less than" inside its own negation. Clauses bound a qualifier to
+ * the value it actually governs.
  */
 
 import type {
@@ -33,6 +38,7 @@ export interface ExtractionResult {
 
 export interface ExtractionOptions {
   sourceId: string;
+  /** Rules scoped to a different upload are excluded from the result. */
   documentKind: DocumentKind;
   /** Injected so tests get stable ids instead of random ones. */
   makeId?: (prefix: string, index: number) => string;
@@ -40,19 +46,32 @@ export interface ExtractionOptions {
 
 const defaultMakeId = (prefix: string, index: number) => `${prefix}-${index}`;
 
-/**
- * Phrases that set an upper bound, mapped to the operator they actually mean.
- * "under" and "less than" exclude the stated value; "up to" and "maximum"
- * include it. Collapsing these would silently change which files pass.
- */
-const UPPER_BOUND_PHRASES: Array<[RegExp, ComparisonOperator]> = [
-  [/\b(?:less\s+than|under|below|smaller\s+than)\b/i, 'lt'],
-  [/\b(?:up\s+to|at\s+most|maximum|max\.?|not\s+exceeding|no\s+more\s+than|within|upto)\b/i, 'lte'],
-];
+/** Which upload a clause is talking about, when it says. */
+type Subject = 'photo' | 'signature' | null;
 
-const LOWER_BOUND_PHRASES: Array<[RegExp, ComparisonOperator]> = [
-  [/\b(?:more\s+than|greater\s+than|above|larger\s+than|exceeding)\b/i, 'gt'],
-  [/\b(?:at\s+least|minimum|min\.?|no\s+less\s+than|not\s+less\s+than)\b/i, 'gte'],
+interface Clause {
+  text: string;
+  /** Offset of this clause within the whole instruction text. */
+  offset: number;
+  subject: Subject;
+}
+
+/**
+ * Comparison phrases, most specific first.
+ *
+ * Negated forms lead, and a match contained inside a longer match is discarded
+ * before the nearest one is chosen — otherwise the "less than" inside "not less
+ * than" wins on position and inverts the requirement.
+ */
+const OPERATOR_PHRASES: Array<[RegExp, ComparisonOperator]> = [
+  [/\b(?:not|no)\s+(?:less\s+than|smaller\s+than|lower\s+than|below|under)\b/gi, 'gte'],
+  [/\b(?:not|no)\s+(?:more\s+than|greater\s+than|larger\s+than|bigger\s+than|above|exceeding)\b/gi, 'lte'],
+  [/\bnot\s+exceed(?:ing)?\b/gi, 'lte'],
+  [/\b(?:at\s+least|minimum|minimum\s+of|min\.?|atleast)\b/gi, 'gte'],
+  [/\b(?:more\s+than|greater\s+than|larger\s+than|above|exceeding)\b/gi, 'gt'],
+  [/\b(?:less\s+than|under|below|smaller\s+than)\b/gi, 'lt'],
+  [/\b(?:up\s?to|at\s+most|maximum|maximum\s+of|max\.?|within|upto|no\s+bigger\s+than)\b/gi, 'lte'],
+  [/\bexactly\b/gi, 'eq'],
 ];
 
 const SIZE_UNITS: Record<string, SizeUnit> = {
@@ -69,123 +88,227 @@ const SIZE_UNITS: Record<string, SizeUnit> = {
   megabytes: 'MB',
 };
 
+const PHYSICAL_UNIT = /^\s*(?:cm|mm|centimet|millimet|inch|inches|in\b|")/i;
+
+/** Marks a format mention as forbidden rather than permitted. */
+const PROHIBITION =
+  /\b(?:not\s+(?:allowed|accepted|permitted|supported)|no[t]?\s+be\s+accepted|cannot\s+be|will\s+be\s+rejected|is\s+forbidden|avoid)\b/i;
+
+const EXCLUSIVE = /\bonly\b/i;
+
 /** Instruction phrases FormReady cannot check. Kept verbatim for the user. */
 const MANUAL_CHECK_PATTERNS: Array<[RegExp, string]> = [
   [/\b\d+\s*dpi\b/i, 'Resolution in DPI cannot be verified from the file alone.'],
-  [/\b(?:white|plain|light)\s+background\b/i, 'Background colour needs your review.'],
+  [/\b(?:white|plain|light|blue)\s+background\b/i, 'Background colour needs your review.'],
   [/\bwithout\s+(?:cap|hat|glasses|spectacles)\b/i, 'This condition needs your review.'],
   [/\brecent(?:ly)?\s+(?:taken|clicked)?\s*photograph?\b/i, 'Photo recency needs your review.'],
   [/\b(?:black|blue)\s+ink\b/i, 'Ink colour needs your review.'],
   [/\bsignature\s+(?:should|must)\s+be\s+(?:clear|legible)\b/i, 'Legibility needs your review.'],
-  [/\b\d+(?:\.\d+)?\s*(?:cm|mm|inch(?:es)?|in)\b/i, 'Physical dimensions need your review.'],
+  [/\b\d+(?:\.\d+)?\s*(?:cm|mm|inch(?:es)?)\b/i, 'Physical dimensions need your review.'],
 ];
+
+/** Parses a matched number, dropping any thousands separators. */
+function toNumber(raw: string): number {
+  return Number(raw.replace(/,/g, ''));
+}
 
 function span(sourceId: string, text: string, start: number, end: number): SourceSpan {
   return { sourceId, start, end, text: text.slice(start, end) };
 }
 
 /**
- * Chooses the operator for a numeric match by looking at the words immediately
- * before it. The window is deliberately short — a qualifier six words away is
- * more likely to belong to a different sentence than to this number.
+ * Splits instructions into clauses, carrying the last named upload forward.
+ *
+ * Commas separate clauses only when not sitting inside a number, so "20,000
+ * bytes" stays whole while "under 50 KB, 200 x 230 pixels" becomes two.
  */
-function operatorBefore(text: string, matchStart: number): ComparisonOperator | null {
-  const window = text.slice(Math.max(0, matchStart - 40), matchStart);
-  for (const [pattern, operator] of [...UPPER_BOUND_PHRASES, ...LOWER_BOUND_PHRASES]) {
-    if (pattern.test(window)) return operator;
+export function splitClauses(text: string): Clause[] {
+  const clauses: Clause[] = [];
+  const boundary = /[.;\n]|,(?!\d)/g;
+  let start = 0;
+  let carried: Subject = null;
+
+  const push = (from: number, to: number) => {
+    const slice = text.slice(from, to);
+    if (!slice.trim()) return;
+    const subject = subjectOf(slice);
+    if (subject) carried = subject;
+    clauses.push({ text: slice, offset: from, subject: subject ?? carried });
+  };
+
+  for (const match of text.matchAll(boundary)) {
+    push(start, match.index!);
+    start = match.index! + 1;
   }
+  push(start, text.length);
+
+  return clauses;
+}
+
+function subjectOf(text: string): Subject {
+  const photo = /\bphotograph?\b|\bphoto\b|\bpicture\b/i.test(text);
+  const signature = /\bsignature\b|\bsign\b/i.test(text);
+  // A clause naming both scopes to neither; the ambiguity is reported instead.
+  if (photo && signature) return null;
+  if (photo) return 'photo';
+  if (signature) return 'signature';
   return null;
 }
 
+/** Does a rule scoped to `subject` apply to the upload being prepared? */
+function appliesTo(subject: Subject, kind: DocumentKind): boolean {
+  if (subject === null) return true;
+  return subject === kind;
+}
+
+interface PhraseMatch {
+  operator: ComparisonOperator;
+  start: number;
+  end: number;
+}
+
+/**
+ * The comparison governing a value at `valueOffset` within a clause.
+ *
+ * Matches contained inside a longer match are dropped, then the nearest
+ * remaining match before the value wins.
+ */
+export function operatorFor(clause: string, valueOffset: number): ComparisonOperator | null {
+  const matches: PhraseMatch[] = [];
+  for (const [pattern, operator] of OPERATOR_PHRASES) {
+    for (const match of clause.matchAll(pattern)) {
+      matches.push({ operator, start: match.index!, end: match.index! + match[0].length });
+    }
+  }
+
+  const outermost = matches.filter(
+    (candidate) =>
+      !matches.some(
+        (other) =>
+          other !== candidate && other.start <= candidate.start && other.end >= candidate.end,
+      ),
+  );
+
+  const before = outermost.filter((match) => match.end <= valueOffset);
+  if (before.length === 0) return null;
+
+  return before.reduce((best, match) => (match.start > best.start ? match : best)).operator;
+}
+
+interface ScopedRule {
+  rule: Rule;
+  subject: Subject;
+}
+
 function extractSizeRules(
+  clauses: Clause[],
   text: string,
   options: Required<ExtractionOptions>,
   ambiguities: Ambiguity[],
-): Rule[] {
-  const rules: Rule[] = [];
+): ScopedRule[] {
+  const scoped: ScopedRule[] = [];
   let index = 0;
 
-  // Ranges first ("between 20 KB and 50 KB", "20 KB to 50 KB"), so their two
-  // numbers are not also picked up as two independent single bounds.
-  const rangePattern =
-    /(?:between\s+)?(\d+(?:\.\d+)?)\s*(b|bytes?|kb|kib|kilobytes?|mb|mib|megabytes?)?\s*(?:to|–|—|-|and)\s*(\d+(?:\.\d+)?)\s*(b|bytes?|kb|kib|kilobytes?|mb|mib|megabytes?)/gi;
-  const consumed: Array<[number, number]> = [];
+  const unitPattern = 'b|bytes?|kb|kib|kilobytes?|mb|mib|megabytes?';
+  // Thousands-grouped form first, so "20,000 bytes" is one number rather than
+  // a failed match followed by a stray "000".
+  const numberPattern = '\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?';
+  const rangePattern = new RegExp(
+    `(?:between\\s+)?(${numberPattern})\\s*(${unitPattern})?\\s*(?:to|–|—|-|and)\\s*(${numberPattern})\\s*(${unitPattern})`,
+    'gi',
+  );
+  const singlePattern = new RegExp(`(${numberPattern})\\s*(${unitPattern})\\b`, 'gi');
 
-  for (const match of text.matchAll(rangePattern)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    const upperUnit = SIZE_UNITS[match[4].toLowerCase()];
-    const lowerUnit = match[2] ? SIZE_UNITS[match[2].toLowerCase()] : upperUnit;
-    const evidence = span(options.sourceId, text, start, end);
+  for (const clause of clauses) {
+    const consumed: Array<[number, number]> = [];
 
-    rules.push({
-      id: options.makeId('size-min', index++),
-      field: 'fileSize',
-      operator: 'gte',
-      value: Number(match[1]),
-      unit: lowerUnit,
-      origin: 'extracted',
-      reviewState: 'proposed',
-      sourceSpan: evidence,
-    });
-    rules.push({
-      id: options.makeId('size-max', index++),
-      field: 'fileSize',
-      operator: 'lte',
-      value: Number(match[3]),
-      unit: upperUnit,
-      origin: 'extracted',
-      reviewState: 'proposed',
-      sourceSpan: evidence,
-    });
-    consumed.push([start, end]);
-  }
+    for (const match of clause.text.matchAll(rangePattern)) {
+      const start = clause.offset + match.index!;
+      const end = start + match[0].length;
+      const upperUnit = SIZE_UNITS[match[4].toLowerCase()];
+      const lowerUnit = match[2] ? SIZE_UNITS[match[2].toLowerCase()] : upperUnit;
+      const evidence = span(options.sourceId, text, start, end);
 
-  const singlePattern = /(\d+(?:\.\d+)?)\s*(b|bytes?|kb|kib|kilobytes?|mb|mib|megabytes?)\b/gi;
-  for (const match of text.matchAll(singlePattern)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    if (consumed.some(([from, to]) => start >= from && end <= to)) continue;
-
-    const unit = SIZE_UNITS[match[2].toLowerCase()];
-    const operator = operatorBefore(text, start);
-    const evidence = span(options.sourceId, text, start, end);
-
-    if (!operator) {
-      // A bare size with no qualifier could be a maximum, a minimum, or an
-      // example. The user decides; the app does not guess.
-      ambiguities.push({
-        text: match[0],
-        reason: 'This size has no stated limit direction. Choose maximum or minimum.',
-        sourceSpan: evidence,
+      scoped.push({
+        subject: clause.subject,
+        rule: {
+          id: options.makeId('size-min', index++),
+          field: 'fileSize',
+          operator: 'gte',
+          value: toNumber(match[1]),
+          unit: lowerUnit,
+          origin: 'extracted',
+          reviewState: 'proposed',
+          sourceSpan: evidence,
+        },
       });
-      rules.push({
-        id: options.makeId('size', index++),
-        field: 'fileSize',
-        operator: 'lte',
-        value: Number(match[1]),
-        unit,
-        origin: 'extracted',
-        reviewState: 'unresolved',
-        sourceSpan: evidence,
-        note: 'No limit direction stated in the instructions.',
+      scoped.push({
+        subject: clause.subject,
+        rule: {
+          id: options.makeId('size-max', index++),
+          field: 'fileSize',
+          operator: 'lte',
+          value: toNumber(match[3]),
+          unit: upperUnit,
+          origin: 'extracted',
+          reviewState: 'proposed',
+          sourceSpan: evidence,
+        },
       });
-      continue;
+      consumed.push([match.index!, match.index! + match[0].length]);
     }
 
-    rules.push({
-      id: options.makeId('size', index++),
-      field: 'fileSize',
-      operator,
-      value: Number(match[1]),
-      unit,
-      origin: 'extracted',
-      reviewState: 'proposed',
-      sourceSpan: evidence,
-    });
+    for (const match of clause.text.matchAll(singlePattern)) {
+      const localStart = match.index!;
+      if (consumed.some(([from, to]) => localStart >= from && localStart < to)) continue;
+
+      const start = clause.offset + localStart;
+      const end = start + match[0].length;
+      const unit = SIZE_UNITS[match[2].toLowerCase()];
+      const operator = operatorFor(clause.text, localStart);
+      const evidence = span(options.sourceId, text, start, end);
+
+      if (!operator) {
+        // A bare size could be a maximum, a minimum, or an example. The user
+        // decides; the app does not guess.
+        ambiguities.push({
+          text: match[0],
+          reason: 'This size has no stated limit direction. Choose maximum or minimum.',
+          sourceSpan: evidence,
+        });
+        scoped.push({
+          subject: clause.subject,
+          rule: {
+            id: options.makeId('size', index++),
+            field: 'fileSize',
+            operator: 'lte',
+            value: toNumber(match[1]),
+            unit,
+            origin: 'extracted',
+            reviewState: 'unresolved',
+            sourceSpan: evidence,
+            note: 'No limit direction stated in the instructions.',
+          },
+        });
+        continue;
+      }
+
+      scoped.push({
+        subject: clause.subject,
+        rule: {
+          id: options.makeId('size', index++),
+          field: 'fileSize',
+          operator,
+          value: toNumber(match[1]),
+          unit,
+          origin: 'extracted',
+          reviewState: 'proposed',
+          sourceSpan: evidence,
+        },
+      });
+    }
   }
 
-  // KiB/MiB spellings state the binary convention outright; KB/MB do not.
   if (/\b(?:kib|mib)\b/i.test(text)) {
     ambiguities.push({
       text: 'KiB/MiB',
@@ -193,89 +316,175 @@ function extractSizeRules(
     });
   }
 
-  return rules;
+  return scoped;
 }
 
 function extractDimensionRules(
+  clauses: Clause[],
   text: string,
   options: Required<ExtractionOptions>,
-): Rule[] {
-  const rules: Rule[] = [];
+  ambiguities: Ambiguity[],
+): ScopedRule[] {
+  const scoped: ScopedRule[] = [];
   let index = 0;
 
-  // "200 x 230 pixels" and "200*230 px".
-  const pairPattern = /(\d{2,5})\s*[x×*]\s*(\d{2,5})\s*(?:px|pixels?)?/gi;
-  for (const match of text.matchAll(pairPattern)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    const evidence = span(options.sourceId, text, start, end);
-    const operator = operatorBefore(text, start) ?? 'eq';
+  const pairPattern = /(\d{2,5})\s*[x×*]\s*(\d{2,5})\s*(px|pixels?)?/gi;
 
-    rules.push({
-      id: options.makeId('width', index),
-      field: 'width',
-      operator,
-      value: Number(match[1]),
-      unit: 'px',
-      origin: 'extracted',
-      reviewState: 'proposed',
-      sourceSpan: evidence,
-    });
-    rules.push({
-      id: options.makeId('height', index),
-      field: 'height',
-      operator,
-      value: Number(match[2]),
-      unit: 'px',
-      origin: 'extracted',
-      reviewState: 'proposed',
-      sourceSpan: evidence,
-    });
-    index += 1;
+  for (const clause of clauses) {
+    for (const match of clause.text.matchAll(pairPattern)) {
+      const localStart = match.index!;
+      const localEnd = localStart + match[0].length;
+      const trailing = clause.text.slice(localEnd);
+
+      // "35 x 45 mm" is a physical size. Reading it as pixels would silently
+      // produce a 35-pixel-wide photograph, so it is left for manual review.
+      if (PHYSICAL_UNIT.test(trailing)) {
+        ambiguities.push({
+          text: `${match[0]}${trailing.slice(0, 4).trimEnd()}`,
+          reason:
+            'These are physical dimensions, not pixels. FormReady cannot convert them without a DPI value — check this one yourself.',
+          sourceSpan: span(options.sourceId, text, clause.offset + localStart, clause.offset + localEnd),
+        });
+        continue;
+      }
+
+      const evidence = span(
+        options.sourceId,
+        text,
+        clause.offset + localStart,
+        clause.offset + localEnd,
+      );
+      const operator = operatorFor(clause.text, localStart) ?? 'eq';
+
+      if (!match[3]) {
+        ambiguities.push({
+          text: match[0],
+          reason: 'No unit was given for these dimensions. They are assumed to be pixels.',
+          sourceSpan: evidence,
+        });
+      }
+
+      for (const [axis, value] of [
+        ['width', match[1]],
+        ['height', match[2]],
+      ] as const) {
+        scoped.push({
+          subject: clause.subject,
+          rule: {
+            id: options.makeId(axis, index),
+            field: axis,
+            operator,
+            value: Number(value),
+            unit: 'px',
+            origin: 'extracted',
+            reviewState: 'proposed',
+            sourceSpan: evidence,
+          },
+        });
+      }
+      index += 1;
+    }
+
+    const axisPattern = /\b(width|height)\b[^.\n]{0,24}?(\d{2,5})\s*(?:px|pixels?)/gi;
+    for (const match of clause.text.matchAll(axisPattern)) {
+      const localStart = match.index!;
+      scoped.push({
+        subject: clause.subject,
+        rule: {
+          id: options.makeId(match[1].toLowerCase(), index++),
+          field: match[1].toLowerCase() as 'width' | 'height',
+          operator: operatorFor(clause.text, localStart) ?? 'eq',
+          value: Number(match[2]),
+          unit: 'px',
+          origin: 'extracted',
+          reviewState: 'proposed',
+          sourceSpan: span(
+            options.sourceId,
+            text,
+            clause.offset + localStart,
+            clause.offset + localStart + match[0].length,
+          ),
+        },
+      });
+    }
   }
 
-  // "width 200 px", "height should be 230 pixels".
-  const axisPattern = /\b(width|height)\b[^.\n]{0,24}?(\d{2,5})\s*(?:px|pixels?)/gi;
-  for (const match of text.matchAll(axisPattern)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    rules.push({
-      id: options.makeId(match[1].toLowerCase(), index++),
-      field: match[1].toLowerCase() as 'width' | 'height',
-      operator: operatorBefore(text, start) ?? 'eq',
-      value: Number(match[2]),
-      unit: 'px',
-      origin: 'extracted',
-      reviewState: 'proposed',
-      sourceSpan: span(options.sourceId, text, start, end),
-    });
-  }
-
-  return rules;
+  return scoped;
 }
 
+/**
+ * Collects the formats the instructions permit.
+ *
+ * A mention is not permission: "PNG is not allowed" names PNG in order to
+ * forbid it, and "only JPEG" excludes everything unnamed. Both are read before
+ * anything is proposed.
+ */
 function extractFormatRule(
+  clauses: Clause[],
   text: string,
   options: Required<ExtractionOptions>,
-): Rule | null {
-  const formats = new Set<ImageFormat>();
-  let first: SourceSpan | null = null;
+  ambiguities: Ambiguity[],
+): ScopedRule | null {
+  const permitted = new Set<ImageFormat>();
+  const forbidden = new Set<ImageFormat>();
+  let exclusive: ImageFormat[] | null = null;
+  let evidence: SourceSpan | null = null;
+  let subject: Subject = null;
 
-  for (const match of text.matchAll(/\b(jpe?g|png)\b/gi)) {
-    const start = match.index!;
-    const end = start + match[0].length;
-    formats.add(match[1].toLowerCase().startsWith('jp') ? 'jpeg' : 'png');
-    first ??= span(options.sourceId, text, start, end);
+  for (const clause of clauses) {
+    const mentions: Array<{ format: ImageFormat; start: number; end: number }> = [];
+    for (const match of clause.text.matchAll(/\b(jpe?g|png)\b/gi)) {
+      mentions.push({
+        format: match[1].toLowerCase().startsWith('jp') ? 'jpeg' : 'png',
+        start: match.index!,
+        end: match.index! + match[0].length,
+      });
+    }
+    if (mentions.length === 0) continue;
+
+    evidence ??= span(
+      options.sourceId,
+      text,
+      clause.offset + mentions[0].start,
+      clause.offset + mentions[0].end,
+    );
+    subject ??= clause.subject;
+
+    const prohibits = PROHIBITION.test(clause.text);
+    for (const mention of mentions) {
+      (prohibits ? forbidden : permitted).add(mention.format);
+    }
+
+    if (!prohibits && EXCLUSIVE.test(clause.text)) {
+      exclusive = mentions.map((mention) => mention.format);
+    }
   }
 
-  if (formats.size === 0 || !first) return null;
+  if (!evidence) return null;
+
+  let allowed = exclusive ?? [...permitted];
+  allowed = allowed.filter((format) => !forbidden.has(format));
+
+  if (allowed.length === 0) {
+    ambiguities.push({
+      text: [...forbidden].map((format) => format.toUpperCase()).join(', '),
+      reason:
+        'These instructions rule out every format FormReady can produce. Choose the format for this upload yourself.',
+      sourceSpan: evidence,
+    });
+    return null;
+  }
+
   return {
-    id: options.makeId('format', 0),
-    field: 'format',
-    allowed: [...formats],
-    origin: 'extracted',
-    reviewState: 'proposed',
-    sourceSpan: first,
+    subject,
+    rule: {
+      id: options.makeId('format', 0),
+      field: 'format',
+      allowed,
+      origin: 'extracted',
+      reviewState: 'proposed',
+      sourceSpan: evidence,
+    },
   };
 }
 
@@ -286,7 +495,7 @@ function extractManualChecks(
   const checks: ManualCheck[] = [];
   MANUAL_CHECK_PATTERNS.forEach(([pattern, reason], patternIndex) => {
     const match = pattern.exec(text);
-    if (!match?.index && match?.index !== 0) return;
+    if (match?.index === undefined) return;
     checks.push({
       id: options.makeId('manual', patternIndex),
       text: `${match[0]} — ${reason}`,
@@ -298,35 +507,38 @@ function extractManualChecks(
 }
 
 export function extractRules(text: string, options: ExtractionOptions): ExtractionResult {
-  const resolved: Required<ExtractionOptions> = {
-    makeId: defaultMakeId,
-    ...options,
-  };
+  const resolved: Required<ExtractionOptions> = { makeId: defaultMakeId, ...options };
   const ambiguities: Ambiguity[] = [];
+  const clauses = splitClauses(text);
 
-  const rules: Rule[] = [
-    ...extractSizeRules(text, resolved, ambiguities),
-    ...extractDimensionRules(text, resolved),
+  const scoped: ScopedRule[] = [
+    ...extractSizeRules(clauses, text, resolved, ambiguities),
+    ...extractDimensionRules(clauses, text, resolved, ambiguities),
   ];
-  const format = extractFormatRule(text, resolved);
-  if (format) rules.push(format);
+  const format = extractFormatRule(clauses, text, resolved, ambiguities);
+  if (format) scoped.push(format);
 
-  const manualChecks = extractManualChecks(text, resolved);
+  // Rules belonging to a different upload are dropped rather than merged. The
+  // signature limit in a photograph's instructions is not the photograph's.
+  const applicable = scoped.filter((entry) => appliesTo(entry.subject, resolved.documentKind));
+  const excluded = scoped.filter((entry) => !appliesTo(entry.subject, resolved.documentKind));
 
-  if (rules.length === 0) {
+  if (excluded.length > 0) {
+    const others = [...new Set(excluded.map((entry) => entry.subject))].filter(Boolean);
     ambiguities.push({
-      text: text.slice(0, 120),
-      reason:
-        'No supported file requirement was found. Add a size, format, or dimension target yourself.',
+      text: others.join(' and '),
+      reason: `These instructions also cover a ${others.join(' and ')}. Those requirements were left out — change "This file is a" above if you meant one of them.`,
     });
   }
 
-  // A photo and a signature limit in the same block must not be merged (FR-04).
-  if (/\bphotograph?\b/i.test(text) && /\bsignature\b/i.test(text)) {
+  const rules = applicable.map((entry) => entry.rule);
+  const manualChecks = extractManualChecks(text, resolved);
+
+  if (rules.length === 0 && text.trim().length > 0) {
     ambiguities.push({
-      text: 'photograph and signature',
+      text: text.slice(0, 120),
       reason:
-        'These instructions cover more than one upload. Confirm which one this file is for.',
+        'No supported file requirement was found for this upload. Add a size, format, or dimension target yourself.',
     });
   }
 

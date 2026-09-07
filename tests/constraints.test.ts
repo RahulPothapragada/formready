@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_OUTPUT_DIMENSION,
   allowedFormats,
   applyOperator,
   dimensionBounds,
   findConflicts,
   isImpossible,
+  isUsableRule,
+  ruleProblem,
   satisfies,
   sizeBounds,
   toBytes,
@@ -119,5 +122,72 @@ describe('conflict detection', () => {
     ];
     expect(findConflicts(rules, 'decimal')).toHaveLength(1);
     expect(findConflicts(rules, 'binary')).toHaveLength(0);
+  });
+});
+
+/**
+ * Numeric validity is decided here so every entry path shares it. An empty
+ * number field reads back as Number('') === 0, and the input's `min` attribute
+ * does not stop that value reaching state in a button-driven form.
+ */
+describe('rule validity', () => {
+  const width = (value: number): Rule => ({
+    id: 'w',
+    field: 'width',
+    operator: 'eq',
+    value,
+    unit: 'px',
+    origin: 'manual',
+    reviewState: 'confirmed',
+  });
+
+  it('rejects zero, negative, and non-finite values', () => {
+    for (const value of [0, -10, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(isUsableRule(width(value))).toBe(false);
+      expect(ruleProblem(width(value))).not.toBeNull();
+    }
+  });
+
+  it('rejects fractional pixels but allows fractional sizes', () => {
+    expect(isUsableRule(width(200.5))).toBe(false);
+    expect(
+      isUsableRule({
+        id: 's',
+        field: 'fileSize',
+        operator: 'lte',
+        value: 1.5,
+        unit: 'MB',
+        origin: 'manual',
+        reviewState: 'confirmed',
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a dimension too large to allocate', () => {
+    expect(isUsableRule(width(MAX_OUTPUT_DIMENSION))).toBe(true);
+    expect(isUsableRule(width(MAX_OUTPUT_DIMENSION + 1))).toBe(false);
+  });
+
+  it('rejects a format rule that allows nothing', () => {
+    expect(
+      isUsableRule({
+        id: 'f',
+        field: 'format',
+        allowed: [],
+        origin: 'manual',
+        reviewState: 'confirmed',
+      }),
+    ).toBe(false);
+  });
+
+  it('blocks confirmation, so an unusable value cannot become executable', () => {
+    // Previously a zero-pixel width confirmed cleanly and reached the encoder.
+    const conflicts = findConflicts([width(0)], 'decimal');
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].field).toBe('width');
+  });
+
+  it('ignores unusable values that were never confirmed', () => {
+    expect(findConflicts([{ ...width(0), reviewState: 'proposed' }], 'decimal')).toHaveLength(0);
   });
 });

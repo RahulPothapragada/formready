@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FilePicker from '../../components/FilePicker';
 import RequirementEditor from './RequirementEditor';
@@ -36,14 +36,25 @@ export default function RequirementsPage() {
   );
   const confirmedCount = job.proposedRules.filter((r) => r.reviewState === 'confirmed').length;
 
-  const runExtraction = (nextText: string, sourceId: string) => {
+  const runExtraction = (nextText: string, sourceId: string, kind: DocumentKind) => {
     const result = extractRules(nextText, {
       sourceId,
-      documentKind: job.documentKind,
+      documentKind: kind,
       makeId: (prefix, index) => `${prefix}-${index}-${sourceId.slice(0, 8)}`,
     });
     dispatch({ type: 'SET_PROPOSALS', rules: result.rules, manualChecks: result.manualChecks });
     setAmbiguities(result.ambiguities);
+  };
+
+  /**
+   * Rules are scoped to the upload they were written for, so changing which
+   * document this is changes which of them apply. Without re-running,
+   * switching from Photograph to Signature would leave the photograph's limits
+   * on screen as though they were the signature's.
+   */
+  const changeDocumentKind = (kind: DocumentKind) => {
+    dispatch({ type: 'SET_DOCUMENT_KIND', kind });
+    if (job.instructionSource) runExtraction(text, job.instructionSource.id, kind);
   };
 
   /**
@@ -56,9 +67,30 @@ export default function RequirementsPage() {
   const inputGeneration = useRef(0);
   const ocrAbort = useRef<AbortController | null>(null);
 
+  /**
+   * Recognition is also bound to the job that started it. Deleting saved work
+   * replaces the job while OCR may still be running, and a result landing
+   * afterwards would populate — and then autosave — the fresh job with text
+   * from the discarded one.
+   */
+  const jobIdRef = useRef(job.id);
+  useEffect(() => {
+    jobIdRef.current = job.id;
+  }, [job.id]);
+
+  // Nothing may be dispatched once this screen is gone.
+  useEffect(
+    () => () => {
+      inputGeneration.current += 1;
+      ocrAbort.current?.abort();
+    },
+    [],
+  );
+
   const handleScreenshot = async (file: File) => {
     const sourceId = crypto.randomUUID();
     const generation = (inputGeneration.current += 1);
+    const startedForJob = jobIdRef.current;
 
     ocrAbort.current?.abort();
     const controller = new AbortController();
@@ -77,7 +109,7 @@ export default function RequirementsPage() {
         onProgress: (progress) => setOcrStage(progress.stage),
       });
 
-      if (generation !== inputGeneration.current) return;
+      if (generation !== inputGeneration.current || startedForJob !== jobIdRef.current) return;
 
       dispatch({
         type: 'ADD_INSTRUCTIONS',
@@ -89,9 +121,9 @@ export default function RequirementsPage() {
           imageBlob: file,
         },
       });
-      runExtraction(outcome.text, sourceId);
+      runExtraction(outcome.text, sourceId, job.documentKind);
     } catch {
-      if (generation !== inputGeneration.current) return;
+      if (generation !== inputGeneration.current || startedForJob !== jobIdRef.current) return;
       // OCR failure is recoverable: the text area below stays available.
       setOcrError('Paste the instructions or enter the file requirements.');
     } finally {
@@ -114,7 +146,7 @@ export default function RequirementsPage() {
     } else {
       dispatch({ type: 'EDIT_INSTRUCTION_TEXT', text: value });
     }
-    runExtraction(value, sourceId);
+    runExtraction(value, sourceId, job.documentKind);
   };
 
   return (
@@ -143,9 +175,7 @@ export default function RequirementsPage() {
         <span>This file is a</span>
         <select
           value={job.documentKind}
-          onChange={(event) =>
-            dispatch({ type: 'SET_DOCUMENT_KIND', kind: event.target.value as DocumentKind })
-          }
+          onChange={(event) => changeDocumentKind(event.target.value as DocumentKind)}
         >
           {DOCUMENT_KINDS.map((kind) => (
             <option key={kind.value} value={kind.value}>

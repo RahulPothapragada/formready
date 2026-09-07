@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import SourceEvidence from './SourceEvidence';
+import { ruleProblem } from '../../domain/constraints';
 import type { ComparisonOperator, Rule, SizeUnit } from '../../domain/types';
 
 interface RequirementEditorProps {
@@ -37,6 +39,8 @@ export default function RequirementEditor({
   onRemove,
 }: RequirementEditorProps) {
   const confirmed = rule.reviewState === 'confirmed';
+  const [draft, setDraft] = useState<string | null>(null);
+  const problem = ruleProblem(rule);
 
   return (
     <li className={`requirement ${rule.reviewState}`}>
@@ -88,9 +92,21 @@ export default function RequirementEditor({
             <span className="visually-hidden">Value</span>
             <input
               type="number"
+              inputMode="numeric"
               min={1}
-              value={rule.value}
-              onChange={(event) => onChange({ ...rule, value: Number(event.target.value) })}
+              // Held as text while editing: clearing the field would otherwise
+              // read back as Number('') === 0 and become a zero-pixel rule.
+              value={draft ?? String(rule.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setDraft(next);
+                const parsed = Number(next);
+                if (next.trim() !== '' && Number.isFinite(parsed)) {
+                  onChange({ ...rule, value: parsed });
+                }
+              }}
+              onBlur={() => setDraft(null)}
+              aria-invalid={problem ? true : undefined}
             />
           </label>
           {rule.field === 'fileSize' ? (
@@ -111,6 +127,11 @@ export default function RequirementEditor({
         </div>
       )}
 
+      {problem ? (
+        <p className="error" role="alert">
+          {problem}
+        </p>
+      ) : null}
       {rule.note ? <p className="rule-note">{rule.note}</p> : null}
       <SourceEvidence text={sourceText} span={rule.sourceSpan} />
 
@@ -119,6 +140,7 @@ export default function RequirementEditor({
           <input
             type="checkbox"
             checked={confirmed}
+            disabled={problem !== null && !confirmed}
             onChange={(event) =>
               onChange({ ...rule, reviewState: event.target.checked ? 'confirmed' : 'proposed' })
             }

@@ -69,8 +69,17 @@ export function visualCropToSource(
 /** Smallest crop we let the user make, in image pixels. */
 export const MIN_CROP = 24;
 
-/** Keeps a rectangle inside the image, at or above the minimum size. */
-export function clampCrop(crop: CropRect, bounds: Size): CropRect {
+/**
+ * Keeps a rectangle inside the image, at or above the minimum size.
+ *
+ * With an `aspect`, the two axes are scaled together by a single factor rather
+ * than clipped independently. Clipping each axis to its own limit changes the
+ * ratio — a 600x800 frame doubled inside 1200x800 bounds became 1200x800, which
+ * is 3:2 where 3:4 was required — and the output would then be stretched to fit.
+ */
+export function clampCrop(crop: CropRect, bounds: Size, aspect: number | null = null): CropRect {
+  if (aspect !== null) return clampPreservingAspect(crop, bounds, aspect);
+
   const width = Math.min(Math.max(crop.width, MIN_CROP), bounds.width);
   const height = Math.min(Math.max(crop.height, MIN_CROP), bounds.height);
   return {
@@ -78,6 +87,29 @@ export function clampCrop(crop: CropRect, bounds: Size): CropRect {
     height,
     x: Math.min(Math.max(crop.x, 0), bounds.width - width),
     y: Math.min(Math.max(crop.y, 0), bounds.height - height),
+  };
+}
+
+function clampPreservingAspect(crop: CropRect, bounds: Size, aspect: number): CropRect {
+  const shaped = withAspect(crop, aspect);
+
+  // One factor for both axes: whichever limit bites hardest governs the size.
+  const scale = Math.min(
+    1,
+    bounds.width / shaped.width,
+    bounds.height / shaped.height,
+  );
+  const minScale = Math.max(MIN_CROP / shaped.width, MIN_CROP / shaped.height, 0);
+  const applied = Math.max(scale, Math.min(minScale, 1));
+
+  const width = shaped.width * applied;
+  const height = shaped.height * applied;
+
+  return {
+    width,
+    height,
+    x: Math.min(Math.max(crop.x, 0), Math.max(0, bounds.width - width)),
+    y: Math.min(Math.max(crop.y, 0), Math.max(0, bounds.height - height)),
   };
 }
 
@@ -156,11 +188,16 @@ export function resizeFromHandle(
     };
   }
 
-  return clampCrop(next, bounds);
+  return clampCrop(next, bounds, aspect);
 }
 
 /** Scales a rectangle about its own centre, for pinch gestures. */
-export function scaleAboutCentre(crop: CropRect, factor: number, bounds: Size): CropRect {
+export function scaleAboutCentre(
+  crop: CropRect,
+  factor: number,
+  bounds: Size,
+  aspect: number | null = null,
+): CropRect {
   const centreX = crop.x + crop.width / 2;
   const centreY = crop.y + crop.height / 2;
   const width = crop.width * factor;
@@ -169,6 +206,7 @@ export function scaleAboutCentre(crop: CropRect, factor: number, bounds: Size): 
   return clampCrop(
     { x: centreX - width / 2, y: centreY - height / 2, width, height },
     bounds,
+    aspect,
   );
 }
 

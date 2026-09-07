@@ -801,12 +801,14 @@ button.link {
 .saved-indicator .link { flex: none; font-size: 0.8125rem; min-height: 44px; }
 
 /* Saving silently is a promise; failing silently would be a lie. */
-.saved-indicator.unavailable {
+.saved-indicator.failing {
   border-color: var(--warn);
   color: var(--text);
 }
 
-.saved-indicator.unavailable strong { color: var(--warn); }
+.saved-indicator.failing strong { color: var(--warn); }
+
+.saved-indicator.pending { border-style: dashed; }
 
 .saved-indicator.confirming {
   display: flex;
@@ -820,3 +822,14 @@ button.link {
 
 .saved-indicator.confirming p { margin: 0; }
 .saved-indicator.confirming .actions button { flex: 1; }
+
+/* Each manual requirement is confirmed on its own, not by one blanket tick. */
+.manual-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.manual-ack input { margin-top: 0.2rem; }

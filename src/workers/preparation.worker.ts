@@ -54,6 +54,14 @@ export type PrepareResponse =
     }
   | { type: 'failure'; runId: string; jobRevision: number; failure: PreparationFailure };
 
+/** Raised when a target box would distort the approved crop. */
+class StretchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StretchError';
+  }
+}
+
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
 let activeRunId: string | null = null;
@@ -78,10 +86,14 @@ async function prepare(request: PrepareRequest): Promise<void> {
     bitmap = await decode(request.source);
     const held = bitmap;
 
-    // Plan against the rotated shape: a quarter turn swaps the aspect ratio,
-    // and a ladder built on the unrotated one produces target boxes that
-    // `render()` would stretch into.
-    const planned = orientedSize(held.width, held.height, request.rotation);
+    // Plan against what will actually be encoded: the *cropped* region, after
+    // rotation. Planning from the whole image gives target boxes with the
+    // uncropped aspect ratio — a 600x600 crop of a 1200x800 photo was planned
+    // as 600x400 — and `render()` then stretches the crop to fill them.
+    const cropped = request.crop
+      ? { width: request.crop.width, height: request.crop.height }
+      : { width: held.width, height: held.height };
+    const planned = orientedSize(cropped.width, cropped.height, request.rotation);
 
     post({ type: 'progress', runId, jobRevision, stage: 'searching', attempts: 0 });
 
@@ -94,6 +106,17 @@ async function prepare(request: PrepareRequest): Promise<void> {
       onAttempt: (attempts) =>
         post({ type: 'progress', runId, jobRevision, stage: 'searching', attempts }),
       encode: async (encodeRequest) => {
+        // FR-07: the output must keep the shape the user approved. If a target
+        // box would distort it, that is a decision for the user to make on the
+        // crop screen, not something to absorb here.
+        const requested = encodeRequest.width / encodeRequest.height;
+        const approved = planned.width / planned.height;
+        if (Math.abs(requested - approved) / approved > 0.01) {
+          throw new StretchError(
+            `Meeting these dimensions would change the shape of your image (${encodeRequest.width}x${encodeRequest.height} from ${Math.round(planned.width)}x${Math.round(planned.height)}). Adjust the crop to match.`,
+          );
+        }
+
         const canvas = render({
           bitmap: held,
           crop: request.crop,
@@ -132,6 +155,15 @@ async function prepare(request: PrepareRequest): Promise<void> {
     });
   } catch (error) {
     if (controller.signal.aborted) return;
+    if (error instanceof StretchError) {
+      post({
+        type: 'failure',
+        runId,
+        jobRevision,
+        failure: { kind: 'geometry-conflict', message: error.message, suggestions: ['adjust-crop'] },
+      });
+      return;
+    }
     post({
       type: 'failure',
       runId,
