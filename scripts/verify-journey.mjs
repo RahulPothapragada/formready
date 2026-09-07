@@ -275,6 +275,54 @@ async function runJourney(page, downloadDir) {
   }
   record('Crop editor seeded from real dimensions', cropDefaults.join(', '));
 
+  // With no dimension rules the frame starts as the whole image, which is
+  // correctly pinned — shrink it through the accessible numeric path first, so
+  // there is somewhere for a drag to go.
+  await page.evaluate(`document.querySelector('.crop-precise').open = true; true`);
+  await page.evaluate(setControlled('.crop-fields label:nth-child(3) input', '600'));
+  await sleep(200);
+  const shrunk = await page.evaluate(`
+    [...document.querySelectorAll('.crop-fields input')].map((i) => Number(i.value))`);
+  if (shrunk[2] >= 1200) throw new Error(`Numeric width entry did not resize the frame: ${shrunk}`);
+  record('Frame resized through the numeric fallback', shrunk.join(', '));
+
+  const frame = await page.evaluate(`
+    (() => {
+      const el = document.querySelector('.crop-frame');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+  if (!frame) throw new Error('The crop frame did not render.');
+
+  const before = await page.evaluate(`document.querySelector('.crop-readout').innerText`);
+  // Real pointer events of type "touch". The frame sits at the origin and
+  // spans the full height, so the only direction it can travel is right.
+  await page.evaluate(`
+    (() => {
+      const frame = document.querySelector('.crop-frame');
+      const at = (type, x, y) => frame.dispatchEvent(new PointerEvent(type, {
+        pointerId: 1, pointerType: 'touch', isPrimary: true,
+        bubbles: true, cancelable: true, clientX: x, clientY: y, buttons: type === 'pointerup' ? 0 : 1,
+      }));
+      at('pointerdown', ${frame.x}, ${frame.y});
+      at('pointermove', ${frame.x + 30}, ${frame.y});
+      at('pointermove', ${frame.x + 60}, ${frame.y});
+      at('pointerup', ${frame.x + 60}, ${frame.y});
+      return true;
+    })()`);
+  await sleep(300);
+
+  const moved = await page.evaluate(`
+    [...document.querySelectorAll('.crop-fields input')].map((i) => Number(i.value))`);
+  if (moved[0] === 0) {
+    throw new Error(`Dragging the crop frame did not move it: ${moved.join(', ')}`);
+  }
+  if (moved[2] !== shrunk[2] || moved[3] !== shrunk[3]) {
+    throw new Error('Dragging the frame changed its size as well as its position.');
+  }
+  record('Crop frame responds to dragging', `moved to x=${moved[0]} · ${before.trim()}`);
+
   if (!(await page.evaluate(clickByText('Use the whole image')))) {
     throw new Error('Could not approve the framing.');
   }

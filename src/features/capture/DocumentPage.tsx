@@ -135,7 +135,15 @@ export default function DocumentPage() {
             </button>
           </div>
 
-          <CropEditor source={job.source} requiredAspect={requiredAspect} onApprove={approve} />
+          {/* Keyed on rotation: a quarter turn changes the frame the crop lives
+              in, so the rectangle has to start again rather than be corrected. */}
+          <CropEditor
+            key={`${job.source.id}-${rotation}`}
+            source={job.source}
+            rotation={rotation}
+            requiredAspect={requiredAspect}
+            onApprove={approve}
+          />
         </>
       ) : null}
     </section>

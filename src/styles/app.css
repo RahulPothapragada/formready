@@ -656,3 +656,118 @@ button.link {
 .decisions .actual {
   font-weight: 600;
 }
+
+/* --- Crop editor -------------------------------------------------------- */
+
+.crop-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface);
+  /* The browser must not pan or zoom the page while a crop gesture is running. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.crop-stage.dragging { cursor: grabbing; }
+
+.crop-image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.crop-frame {
+  position: absolute;
+  border: 2px solid #fff;
+  /* One huge shadow dims everything outside the frame; the stage clips it.
+     The thin inner line keeps the white border visible on a pale photo. */
+  box-shadow:
+    inset 0 0 0 1px rgba(8, 10, 16, 0.45),
+    0 0 0 9999px rgba(8, 10, 16, 0.55);
+  cursor: move;
+}
+
+/* Rule-of-thirds guides, drawn only while the frame is being moved. */
+.crop-frame::before,
+.crop-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.crop-frame::before {
+  background:
+    linear-gradient(to right, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.5) calc(33.33% - 0.5px) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px)),
+    linear-gradient(to right, transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.5) calc(66.66% - 0.5px) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px));
+}
+
+.crop-frame::after {
+  background:
+    linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.5) calc(33.33% - 0.5px) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.5) calc(66.66% - 0.5px) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px));
+}
+
+.crop-stage.dragging .crop-frame::before,
+.crop-stage.dragging .crop-frame::after { opacity: 1; }
+
+.crop-frame:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+/* Handles: a small visible corner with a generous invisible touch target. */
+.crop-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  touch-action: none;
+}
+
+.crop-handle::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  border-radius: 2px;
+  /* Passport photos are pale. Without this the white corners disappear into
+     the picture exactly where the user needs to grab them. */
+  filter: drop-shadow(0 0 1.5px rgba(8, 10, 16, 0.9));
+}
+
+/* Anchored inside the frame, not straddling its edge: the stage clips whatever
+   escapes it, so a crop touching the image border would otherwise lose the very
+   handles needed to pull it back. */
+.crop-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.crop-handle.ne { right: 0; top: 0; cursor: nesw-resize; }
+.crop-handle.se { right: 0; bottom: 0; cursor: nwse-resize; }
+.crop-handle.sw { left: 0; bottom: 0; cursor: nesw-resize; }
+
+.crop-handle.nw::after { left: 5px; top: 5px; border-right: 0; border-bottom: 0; }
+.crop-handle.ne::after { right: 5px; top: 5px; border-left: 0; border-bottom: 0; }
+.crop-handle.se::after { right: 5px; bottom: 5px; border-left: 0; border-top: 0; }
+.crop-handle.sw::after { left: 5px; bottom: 5px; border-right: 0; border-top: 0; }
+
+.crop-readout {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.crop-precise summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--accent);
+  padding: 0.25rem 0;
+}
+
+.crop-precise .crop-fields { margin-top: 0.5rem; }
+
+.crop-editor .actions button { flex: 1; }

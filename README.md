@@ -137,6 +137,11 @@ Verified in a real browser (headless Chrome), but not yet on a phone:
   reaches disk.
 - The same journey against the dev server (`verify:journey:dev`), where React
   double-invokes effects — a mode the production build does not exercise.
+- **Direct-manipulation cropping.** Drag to move, pinch or drag a corner to
+  resize, with the shape locked when the rules pin exact dimensions. The
+  rotation conversion — the editor shows the rotated view, the pipeline crops
+  the unrotated source — is a pure module with its own tests, because a wrong
+  conversion keeps the wrong part of the picture and looks like it working.
 - OCR end to end, including offline. All five key tokens read from rendered
   instruction text; cold 190-600 ms, warm 74 ms.
 - The offline claim: assets cached on first use, network cut, OCR and
@@ -163,8 +168,6 @@ Built, but needs a phone to produce output:
 
 Not started:
 
-- Crop editor as a touch overlay (currently numeric inputs, seeded correctly but
-  awkward on a phone)
 - Held-out evaluation set and the results table
 
 Deliberately excluded from v1: PDFs, accounts, batch mode, payments, native NPU
