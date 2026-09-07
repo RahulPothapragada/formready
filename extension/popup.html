@@ -6,7 +6,7 @@
     <style>
       :root { color-scheme: light; }
       body {
-        width: 320px;
+        width: 340px;
         margin: 0;
         padding: 16px;
         font-family: system-ui, -apple-system, Segoe UI, sans-serif;
@@ -19,8 +19,31 @@
       p.tagline {
         font-size: 12px;
         color: #555;
-        margin: 0 0 14px;
+        margin: 0 0 12px;
       }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 12px;
+        border-bottom: 1px solid #e2e2e2;
+      }
+      .tabs button {
+        flex: 1;
+        border: none;
+        background: none;
+        padding: 8px 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #777;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+      }
+      .tabs button.active {
+        color: #1d4ed8;
+        border-bottom-color: #1d4ed8;
+      }
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
       .item {
         display: flex;
         align-items: center;
@@ -67,20 +90,24 @@
         padding: 12px 0;
         text-align: center;
       }
+      form {
+        display: grid;
+        gap: 8px;
+      }
       form#add {
         border-top: 1px solid #eee;
         margin-top: 10px;
         padding-top: 12px;
-        display: grid;
-        gap: 8px;
       }
-      form#add input[type='text'], form#add select {
+      input[type='text'], input[type='password'], select {
         padding: 6px 8px;
         border: 1px solid #ccc;
         border-radius: 6px;
         font-size: 13px;
+        width: 100%;
+        box-sizing: border-box;
       }
-      form#add button {
+      button[type='submit'], .btn {
         background: #1d4ed8;
         color: white;
         border: none;
@@ -90,33 +117,109 @@
         font-weight: 600;
         cursor: pointer;
       }
+      .btn.secondary {
+        background: #f0f0f0;
+        color: #333;
+      }
+      .btn-row { display: flex; gap: 6px; }
+      .btn-row .btn { flex: 1; }
       .footnote {
         font-size: 10px;
         color: #999;
         margin-top: 10px;
         line-height: 1.4;
       }
+      .field-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #555;
+        margin-top: 4px;
+      }
+      .lock-status {
+        font-size: 12px;
+        padding: 8px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+      }
+      .lock-status.locked { background: #fef2f2; color: #991b1b; }
+      .lock-status.unlocked { background: #f0fdf4; color: #166534; }
     </style>
   </head>
   <body>
     <h1>FormReady Autopilot</h1>
     <p class="tagline">Your document vault. Saved once, stays on this device.</p>
-    <div id="list"></div>
-    <div id="empty" hidden>No documents saved yet.</div>
-    <form id="add">
-      <input type="text" id="label" placeholder="Label, e.g. Passport photo" required />
-      <select id="kind">
-        <option value="photo">Photo</option>
-        <option value="signature">Signature</option>
-        <option value="other">Other</option>
-      </select>
-      <input type="file" id="file" accept="image/jpeg,image/png" required />
-      <button type="submit">Save to vault</button>
-    </form>
-    <p class="footnote">
-      Stored in this browser profile only, via chrome.storage.local. Nothing here is uploaded to
-      any server — that's what makes "attach compliant file" safe to do automatically.
-    </p>
+
+    <div class="tabs">
+      <button id="tab-docs" class="active">Documents</button>
+      <button id="tab-profile">Profile &amp; keys</button>
+    </div>
+
+    <div id="panel-docs" class="tab-panel active">
+      <div id="list"></div>
+      <div id="empty" hidden>No documents saved yet.</div>
+      <form id="add">
+        <input type="text" id="label" placeholder="Label, e.g. Passport photo" required />
+        <select id="kind">
+          <option value="photo">Photo</option>
+          <option value="signature">Signature</option>
+          <option value="other">Other</option>
+        </select>
+        <input type="file" id="file" accept="image/jpeg,image/png" required />
+        <button type="submit">Save to vault</button>
+      </form>
+      <p class="footnote">
+        Stored in this browser profile only, via chrome.storage.local. Nothing here is uploaded to
+        any server — that's what makes "attach compliant file" safe to do automatically.
+      </p>
+    </div>
+
+    <div id="panel-profile" class="tab-panel">
+      <div id="lock-status" class="lock-status locked">Vault locked.</div>
+
+      <form id="unlock-form">
+        <input type="password" id="unlock-passphrase" placeholder="Passphrase" required />
+        <button type="submit" class="btn">Unlock</button>
+      </form>
+
+      <form id="profile-form" hidden>
+        <div class="field-label">Personal details (for autofill)</div>
+        <input type="text" id="pf-fullName" placeholder="Full name" />
+        <input type="text" id="pf-fatherName" placeholder="Father's name" />
+        <input type="text" id="pf-dob" placeholder="Date of birth (DD/MM/YYYY)" />
+        <input type="text" id="pf-phone" placeholder="Phone" />
+        <input type="text" id="pf-email" placeholder="Email" />
+        <input type="text" id="pf-aadhaar" placeholder="Aadhaar number" />
+        <input type="text" id="pf-pan" placeholder="PAN number" />
+        <input type="text" id="pf-addressLine1" placeholder="Address line 1" />
+        <input type="text" id="pf-addressLine2" placeholder="Address line 2" />
+        <input type="text" id="pf-city" placeholder="City" />
+        <input type="text" id="pf-district" placeholder="District" />
+        <input type="text" id="pf-state" placeholder="State" />
+        <input type="text" id="pf-pincode" placeholder="Pincode" />
+
+        <div class="field-label">Anthropic API key (for the AI form-reading fallback)</div>
+        <input type="password" id="pf-apiKey" placeholder="sk-ant-..." />
+
+        <div class="btn-row">
+          <button type="submit" class="btn">Save (encrypted)</button>
+          <button type="button" id="lock-now" class="btn secondary">Lock now</button>
+        </div>
+      </form>
+
+      <form id="setup-form" hidden>
+        <div class="field-label">Choose a passphrase to encrypt this vault</div>
+        <input type="password" id="setup-passphrase" placeholder="Choose a passphrase" required />
+        <button type="submit" class="btn">Create vault</button>
+      </form>
+
+      <p class="footnote">
+        Encrypted with AES-256-GCM, derived from your passphrase. The decrypted copy lives only in
+        memory for this browser session — never written to disk, never sent anywhere except to
+        Anthropic's API when you explicitly trigger the AI fallback, and even then only a screenshot
+        of the blank form layout is sent, never your saved values.
+      </p>
+    </div>
+
     <script src="dist/popup.js"></script>
   </body>
 </html>

@@ -5,7 +5,7 @@
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["node", "vitest/globals"],
+    "types": ["node", "vitest/globals", "chrome"],
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
