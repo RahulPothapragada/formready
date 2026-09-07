@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scholarship Application Form (Demo Mock)</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f0f2f5; margin: 0; }
+  .banner { background: #7a1f1f; color: white; text-align: center; padding: 6px; font: 700 12px system-ui, sans-serif; letter-spacing: 0.04em; }
+  header { background: #4a2b7a; color: white; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: 0.85; }
+  main { max-width: 640px; margin: 22px auto; background: white; border: 1px solid #d7dde5; padding: 24px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-weight: 700; margin-bottom: 4px; font-size: 13px; }
+  .hint { color: #666; font-size: 11.5px; margin: 0 0 6px; }
+  input[type="text"], select { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+  .row { display: flex; gap: 12px; }
+  .row .field { flex: 1; }
+  button.submit { background: #4a2b7a; color: white; border: none; padding: 9px 20px; font-size: 13px; cursor: pointer; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div class="banner">DEMO MOCK PORTAL — not a real government website — built to demonstrate FormReady Autopilot</div>
+  <header>
+    <h1>National Merit Scholarship — Online Application</h1>
+    <p>Personal Details &amp; Document Upload</p>
+  </header>
+  <main>
+    <form onsubmit="return false;">
+      <div class="field">
+        <label for="applicant-name">Full Name (as per Aadhaar)</label>
+        <input type="text" id="applicant-name" name="applicant_name" autocomplete="name" />
+      </div>
+
+      <div class="field">
+        <label for="father-name">Father's Name</label>
+        <input type="text" id="father-name" name="father_name" />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="dob">Date of Birth</label>
+          <input type="text" id="dob" name="dob" placeholder="DD/MM/YYYY" autocomplete="bday" />
+        </div>
+        <div class="field">
+          <label for="phone">Mobile Number</label>
+          <input type="text" id="phone" name="phone" autocomplete="tel" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="email">Email Address</label>
+        <input type="text" id="email" name="email" autocomplete="email" />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="aadhaar">Aadhaar Number</label>
+          <input type="text" id="aadhaar" name="aadhaar" placeholder="12-digit number" />
+        </div>
+        <div class="field">
+          <label for="pan">PAN Number</label>
+          <input type="text" id="pan" name="pan" placeholder="10-character PAN" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="address1">Address Line 1</label>
+        <input type="text" id="address1" name="address1" autocomplete="address-line1" />
+      </div>
+      <div class="field">
+        <label for="address2">Address Line 2</label>
+        <input type="text" id="address2" name="address2" autocomplete="address-line2" />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="city">City</label>
+          <input type="text" id="city" name="city" />
+        </div>
+        <div class="field">
+          <label for="district">District</label>
+          <input type="text" id="district" name="district" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="state">State</label>
+          <select id="state" name="state">
+            <option value="">Choose...</option>
+            <option value="KA">Karnataka</option>
+            <option value="MH">Maharashtra</option>
+            <option value="TN">Tamil Nadu</option>
+            <option value="DL">Delhi</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="pincode">Pincode</label>
+          <input type="text" id="pincode" name="pincode" autocomplete="postal-code" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="photo">Recent Photograph</label>
+        <p class="hint">JPEG, up to 50 KB, 200 x 230 pixels.</p>
+        <input type="file" id="photo" name="photo" accept="image/jpeg,image/png" />
+        <div class="hint" id="photo-status"></div>
+      </div>
+
+      <div class="field">
+        <label for="marksheet">Supporting Document (Marksheet)</label>
+        <p class="hint">PDF only.</p>
+        <input type="file" id="marksheet" name="marksheet" accept="application/pdf" />
+        <div class="hint" id="marksheet-status"></div>
+      </div>
+
+      <button class="submit" type="submit">Save and Continue</button>
+    </form>
+  </main>
+
+  <script>
+    for (const id of ['photo', 'marksheet']) {
+      const input = document.getElementById(id);
+      const status = document.getElementById(id + '-status');
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) { status.textContent = ''; return; }
+        status.textContent = `Received by portal: ${file.name} — ${(file.size / 1024).toFixed(1)} KB, ${file.type}`;
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Competitive Exam Application — Upload (Demo Mock)</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #eef1f5; margin: 0; }
+  .banner { background: #7a1f1f; color: white; text-align: center; padding: 6px; font: 700 12px system-ui, sans-serif; letter-spacing: 0.04em; }
+  header { background: #0b6e4f; color: white; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: 0.85; }
+  main { max-width: 620px; margin: 22px auto; background: white; border: 1px solid #d7dde5; padding: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 10px 6px; vertical-align: top; border-bottom: 1px solid #eee; font-size: 13px; }
+  td.label-cell { width: 160px; font-weight: 700; }
+  .instructions { color: #444; font-size: 12.5px; line-height: 1.5; margin: 0 0 8px; }
+  .status { margin-top: 6px; font-size: 12px; }
+  .status.ok { color: #0a7c33; font-weight: 600; }
+  button.submit { background: #0b6e4f; color: white; border: none; padding: 9px 20px; font-size: 13px; cursor: pointer; margin-top: 16px; }
+</style>
+</head>
+<body>
+  <div class="banner">DEMO MOCK PORTAL — not a real government website — built to demonstrate FormReady Autopilot</div>
+  <header>
+    <h1>Combined Graduate Level Examination — Online Application</h1>
+    <p>Upload Documents</p>
+  </header>
+  <main>
+    <table>
+      <tr>
+        <td class="label-cell">Recent Photograph</td>
+        <td>
+          <p class="instructions">
+            The photograph must not be less than 20 KB and not more than 50 KB.
+            Only JPG is accepted. Dimensions should be between 200 x 230 and
+            300 x 350 pixels. Photo should not be older than 3 months — this
+            needs your own check.
+          </p>
+          <input type="file" id="candidate-photo" name="candidate-photo" accept="image/jpeg,image/png" />
+          <div class="status" id="candidate-photo-status"></div>
+        </td>
+      </tr>
+      <tr>
+        <td class="label-cell">Signature</td>
+        <td>
+          <p class="instructions">
+            Upload your signature in black or blue ink, scanned as a JPEG.
+            File size: minimum 10 KB, maximum 20 KB. Size in pixels: 140 x 60.
+          </p>
+          <input type="file" id="candidate-signature" name="candidate-signature" accept="image/jpeg,image/png" />
+          <div class="status" id="candidate-signature-status"></div>
+        </td>
+      </tr>
+    </table>
+    <button class="submit" type="button">Save and Continue</button>
+  </main>
+
+  <script>
+    for (const id of ['candidate-photo', 'candidate-signature']) {
+      const input = document.getElementById(id);
+      const status = document.getElementById(id + '-status');
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) { status.textContent = ''; return; }
+        status.textContent = `Received by portal: ${file.name} — ${(file.size / 1024).toFixed(1)} KB, ${file.type}`;
+        status.className = 'status ok';
+      });
+    }
+  </script>
+</body>
+</html>

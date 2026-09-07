@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Passport Application — Document Upload (Demo Mock)</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; background: #f2f4f7; margin: 0; }
+  .banner { background: #7a1f1f; color: white; text-align: center; padding: 6px; font: 700 12px system-ui, sans-serif; letter-spacing: 0.04em; }
+  header { background: #12356b; color: white; padding: 18px 28px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: 0.85; font-family: system-ui, sans-serif; }
+  main { max-width: 640px; margin: 24px auto; background: white; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 28px; }
+  .field { margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px solid #e6e6e6; }
+  .field label { display: block; font-weight: 700; margin-bottom: 6px; font-family: system-ui, sans-serif; font-size: 14px; }
+  .instructions { font-size: 13px; color: #444; margin-bottom: 10px; line-height: 1.5; font-family: system-ui, sans-serif; }
+  input[type="text"] { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 16px; font-family: system-ui, sans-serif; }
+  .status { margin-top: 8px; font-size: 12px; font-family: system-ui, sans-serif; }
+  .status.ok { color: #0a7c33; font-weight: 600; }
+  button.submit { background: #12356b; color: white; border: none; padding: 10px 22px; border-radius: 4px; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div class="banner">DEMO MOCK PORTAL — not a real government website — built to demonstrate FormReady Autopilot</div>
+  <header>
+    <h1>National Passport Application Portal</h1>
+    <p>Document Upload — Step 3 of 5</p>
+  </header>
+  <main>
+    <form onsubmit="return false;">
+      <div class="field">
+        <label for="applicant-name">Full name (as per Aadhaar)</label>
+        <input type="text" id="applicant-name" placeholder="e.g. Arya Dhotre" />
+      </div>
+
+      <div class="field">
+        <label for="photo">Photograph</label>
+        <p class="instructions">
+          Upload a recent passport-style photograph. The photo must be a JPEG file,
+          up to 50 KB in size, and exactly 350 x 350 pixels. Background should be
+          plain white — this cannot be checked automatically, please verify yourself.
+        </p>
+        <input type="file" id="photo" name="photo" accept="image/jpeg,image/png" />
+        <div class="status" id="photo-status"></div>
+      </div>
+
+      <div class="field">
+        <label for="signature">Signature</label>
+        <p class="instructions">
+          Upload a scanned image of your signature. File size should be between
+          10 KB and 20 KB, in JPEG format, 140 x 60 pixels.
+        </p>
+        <input type="file" id="signature" name="signature" accept="image/jpeg,image/png" />
+        <div class="status" id="signature-status"></div>
+      </div>
+
+      <button class="submit" type="submit">Continue</button>
+    </form>
+  </main>
+
+  <script>
+    for (const id of ['photo', 'signature']) {
+      const input = document.getElementById(id);
+      const status = document.getElementById(id + '-status');
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) { status.textContent = ''; return; }
+        status.textContent = `Received by portal: ${file.name} — ${(file.size / 1024).toFixed(1)} KB, ${file.type}`;
+        status.className = 'status ok';
+      });
+    }
+  </script>
+</body>
+</html>
