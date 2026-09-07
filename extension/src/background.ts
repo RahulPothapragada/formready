@@ -8,6 +8,8 @@
  * module-level variable that assumes the worker stays alive.
  */
 
+import type { ImageFormat } from '../../src/domain/types';
+import { imageToPdf } from './formatConvert';
 import { getUnlockedVault } from './profile';
 import { classifyFieldsWithVision, type VisionCandidate, type VisionResult } from './visionFallback';
 
@@ -19,6 +21,14 @@ export interface VisionClassifyMessage {
 export type VisionClassifyResponse =
   | { ok: true; results: VisionResult[] }
   | { ok: false; error: string };
+
+export interface ConvertToPdfMessage {
+  type: 'formready-convert-to-pdf';
+  imageBlob: Blob;
+  format: ImageFormat;
+}
+
+export type ConvertToPdfResponse = { ok: true; pdfBlob: Blob } | { ok: false; error: string };
 
 chrome.runtime.onMessage.addListener((message: VisionClassifyMessage, sender, sendResponse) => {
   if (message?.type !== 'formready-vision-classify') return undefined;
@@ -52,4 +62,23 @@ chrome.runtime.onMessage.addListener((message: VisionClassifyMessage, sender, se
   })();
 
   return true; // keep the message channel open for the async sendResponse above
+});
+
+chrome.runtime.onMessage.addListener((message: ConvertToPdfMessage, _sender, sendResponse) => {
+  if (message?.type !== 'formready-convert-to-pdf') return undefined;
+
+  (async (): Promise<void> => {
+    try {
+      const imageBytes = new Uint8Array(await message.imageBlob.arrayBuffer());
+      const pdfBlob = await imageToPdf(imageBytes, message.format);
+      sendResponse({ ok: true, pdfBlob } satisfies ConvertToPdfResponse);
+    } catch (error) {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      } satisfies ConvertToPdfResponse);
+    }
+  })();
+
+  return true;
 });

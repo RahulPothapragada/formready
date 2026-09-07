@@ -9,20 +9,37 @@
  */
 
 import { buildValidationReport, isUsableRule } from '../../src/domain/constraints';
-import type { ConfirmedRequirements, DocumentKind, Rule } from '../../src/domain/types';
+import type { ConfirmedRequirements, DocumentKind, ImageFormat, Rule } from '../../src/domain/types';
 import { extractRules } from '../../src/features/requirements/extractRules';
 import { searchCandidates, type EncodeFn } from '../../src/features/preparation/generateCandidates';
-import { decode, encode, render } from '../../src/services/imageCodec';
+import { decode, encode, readFormat, render } from '../../src/services/imageCodec';
 import { dataUrlToBlob, listVaultItems, type VaultItem } from './vault';
+import { fieldRequiresPdfConversion } from './formatConvertRule';
+import type { ConvertToPdfMessage, ConvertToPdfResponse } from './background';
+
+/**
+ * PDF conversion runs in the background service worker, not here: pdf-lib
+ * is ~1MB, and this content script is injected into every page the
+ * browser visits — that library has no business loading on pages that
+ * never touch a PDF field.
+ */
+async function convertToPdfViaBackground(imageBlob: Blob, format: ImageFormat): Promise<Blob> {
+  const message: ConvertToPdfMessage = { type: 'formready-convert-to-pdf', imageBlob, format };
+  const response: ConvertToPdfResponse = await chrome.runtime.sendMessage(message);
+  if (!response.ok) throw new Error(response.error);
+  return response.pdfBlob;
+}
 
 const processed = new WeakSet<HTMLInputElement>();
 
 function isImageFileInput(input: HTMLInputElement): boolean {
   if (input.type !== 'file') return false;
   const accept = (input.getAttribute('accept') ?? '').toLowerCase();
-  if (accept && !accept.includes('image') && !accept.includes('.jpg') && !accept.includes('.jpeg') && !accept.includes('.png')) {
-    return false;
-  }
+  const acceptsImage = accept.includes('image') || accept.includes('.jpg') || accept.includes('.jpeg') || accept.includes('.png');
+  const acceptsPdf = accept.includes('pdf');
+  // A PDF-only field is still one we can serve: the vault holds an image,
+  // and formatConvert.ts turns it into a single-page PDF automatically.
+  if (accept && !acceptsImage && !acceptsPdf) return false;
   return true;
 }
 
@@ -177,11 +194,24 @@ async function runPipeline(
     .map((rule) => ({ ...rule, reviewState: 'confirmed' as const }));
 
   if (confirmedRules.length === 0) {
-    panel.innerHTML = `
-      <h4 class="fr-fail">No explicit requirements found nearby</h4>
-      <div class="fr-note">FormReady looks for size, format, and pixel-dimension rules in the text next to this field and found none it could parse confidently. Attaching "${item.label}" as saved, unmodified.</div>
-    `;
-    attachFileToInput(input, await dataUrlToBlob(item.dataUrl), item.label.replace(/\s+/g, '_'), 'image/jpeg');
+    const needsPdf = fieldRequiresPdfConversion(input.getAttribute('accept') ?? '');
+    const baseName = item.label.replace(/\s+/g, '_');
+    if (needsPdf) {
+      const sourceBlob = await dataUrlToBlob(item.dataUrl);
+      const sourceFormat = (await readFormat(sourceBlob)) ?? 'jpeg';
+      const pdfBlob = await convertToPdfViaBackground(sourceBlob, sourceFormat);
+      panel.innerHTML = `
+        <h4 class="fr-fail">No explicit requirements found nearby</h4>
+        <div class="fr-note">Found none it could parse confidently near this field. Converted "${item.label}" to PDF (this field only accepts PDF) and attached it unmodified otherwise.</div>
+      `;
+      attachFileToInput(input, pdfBlob, `${baseName}.pdf`, 'application/pdf');
+    } else {
+      panel.innerHTML = `
+        <h4 class="fr-fail">No explicit requirements found nearby</h4>
+        <div class="fr-note">FormReady looks for size, format, and pixel-dimension rules in the text next to this field and found none it could parse confidently. Attaching "${item.label}" as saved, unmodified.</div>
+      `;
+      attachFileToInput(input, await dataUrlToBlob(item.dataUrl), baseName, 'image/jpeg');
+    }
     button.disabled = false;
     return;
   }
@@ -217,24 +247,35 @@ async function runPipeline(
     }
 
     const { blob, metadata } = outcome.result;
-    const ext = metadata.format === 'jpeg' ? 'jpg' : 'png';
-    attachFileToInput(input, blob, `${item.label.replace(/\s+/g, '_')}.${ext}`, `image/${metadata.format}`);
+    const baseName = item.label.replace(/\s+/g, '_');
+    const needsPdf = fieldRequiresPdfConversion(input.getAttribute('accept') ?? '');
 
     const report = buildValidationReport(
       { id: 'autopilot', blob, sourceId: 'autopilot', jobRevision: 0, metadata, attempts: outcome.attempts },
       requirements,
       Date.now(),
     );
-
     const rows = report.results
       .map((result) => `<li>${result.field}: ${result.expected} — measured ${result.actual} (${result.outcome})</li>`)
       .join('');
 
-    panel.innerHTML = `
-      <h4 class="fr-ok">Attached ✓ ${metadata.width}×${metadata.height}, ${(metadata.byteLength / 1024).toFixed(1)} KB, ${metadata.format.toUpperCase()}</h4>
-      <ul>${rows}</ul>
-      <div class="fr-note">${outcome.attempts} encode attempts, entirely on this device.</div>
-    `;
+    if (needsPdf) {
+      const pdfBlob = await convertToPdfViaBackground(blob, metadata.format);
+      attachFileToInput(input, pdfBlob, `${baseName}.pdf`, 'application/pdf');
+      panel.innerHTML = `
+        <h4 class="fr-ok">Attached ✓ converted to PDF (${metadata.width}×${metadata.height} source, ${(metadata.byteLength / 1024).toFixed(1)} KB before conversion)</h4>
+        <ul>${rows}</ul>
+        <div class="fr-note">This field only accepts PDF — the prepared image was embedded as a single-page PDF. ${outcome.attempts} encode attempts, entirely on this device.</div>
+      `;
+    } else {
+      const ext = metadata.format === 'jpeg' ? 'jpg' : 'png';
+      attachFileToInput(input, blob, `${baseName}.${ext}`, `image/${metadata.format}`);
+      panel.innerHTML = `
+        <h4 class="fr-ok">Attached ✓ ${metadata.width}×${metadata.height}, ${(metadata.byteLength / 1024).toFixed(1)} KB, ${metadata.format.toUpperCase()}</h4>
+        <ul>${rows}</ul>
+        <div class="fr-note">${outcome.attempts} encode attempts, entirely on this device.</div>
+      `;
+    }
   } catch (error) {
     panel.innerHTML = `<h4 class="fr-fail">Something went wrong</h4><div>${error instanceof Error ? error.message : String(error)}</div>`;
   } finally {
