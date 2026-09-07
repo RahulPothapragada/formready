@@ -5,6 +5,8 @@ import {
   searchCandidates,
   type EncodeFn,
 } from '../src/features/preparation/generateCandidates';
+import { orientedSize } from '../src/services/imageCodec';
+import { UNBOUNDED } from '../src/domain/constraints';
 import type { ConfirmedRequirements, Rule } from '../src/domain/types';
 
 /**
@@ -270,6 +272,60 @@ describe('PNG search', () => {
 
     expect(outcome.ok).toBe(true);
     expect(encode.mock.calls[0][0].format).toBe('jpeg');
+  });
+});
+
+describe('rotation-aware planning', () => {
+  it('swaps the source shape for a quarter turn', () => {
+    // A 3000×4000 portrait rotated 90° is a 4000×3000 landscape. Planning
+    // against the unrotated shape yields target boxes with the wrong aspect
+    // ratio, which render() would then stretch into.
+    expect(orientedSize(3000, 4000, 90)).toEqual({ width: 4000, height: 3000 });
+    expect(orientedSize(3000, 4000, 270)).toEqual({ width: 4000, height: 3000 });
+  });
+
+  it('leaves the shape alone for half turns and no rotation', () => {
+    expect(orientedSize(3000, 4000, 0)).toEqual({ width: 3000, height: 4000 });
+    expect(orientedSize(3000, 4000, 180)).toEqual({ width: 3000, height: 4000 });
+  });
+
+  it('produces a ladder matching the rotated aspect ratio', () => {
+    const rotated = orientedSize(3000, 4000, 90);
+    const ladder = geometryLadder(rotated.width, rotated.height, { min: null, max: 800 }, UNBOUNDED);
+
+    expect(ladder[0].width).toBeGreaterThan(ladder[0].height);
+    expect(ladder[0].width / ladder[0].height).toBeCloseTo(4 / 3, 1);
+  });
+});
+
+describe('attempt reporting', () => {
+  it('reports every attempt in order, with no gaps', async () => {
+    const seen: number[] = [];
+    const outcome = await searchCandidates({
+      sourceWidth: 3000,
+      sourceHeight: 4000,
+      requirements: requirements([JPEG_ONLY, size('max', 'lte', 50)]),
+      encode: fakeEncoder(),
+      now: clock,
+      onAttempt: (attempts) => seen.push(attempts),
+    });
+
+    expect(seen).toEqual(Array.from({ length: seen.length }, (_, index) => index + 1));
+    expect(seen[seen.length - 1]).toBe(outcome.attempts);
+  });
+
+  it('reports nothing when the rules are contradictory and no encode happens', async () => {
+    const seen: number[] = [];
+    await searchCandidates({
+      sourceWidth: 800,
+      sourceHeight: 920,
+      requirements: requirements([size('min', 'gte', 100), size('max', 'lte', 50)]),
+      encode: fakeEncoder(),
+      now: clock,
+      onAttempt: (attempts) => seen.push(attempts),
+    });
+
+    expect(seen).toEqual([]);
   });
 });
 

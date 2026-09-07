@@ -66,6 +66,12 @@ export interface SearchContext {
   budget?: SearchBudget;
   now?: () => number;
   signal?: AbortSignal;
+  /**
+   * Called after each encode attempt. Reports the real attempt count — the UI
+   * uses it to show progress without inventing a percentage, since the search
+   * does not know in advance how many attempts it needs.
+   */
+  onAttempt?: (attempts: number) => void;
 }
 
 export type SearchOutcome =
@@ -145,6 +151,10 @@ export async function searchCandidates(context: SearchContext): Promise<SearchOu
   let attempts = 0;
   const exhausted = () =>
     attempts >= budget.maxAttempts || now() - startedAt >= budget.maxMillis;
+  const countAttempt = () => {
+    attempts += 1;
+    context.onAttempt?.(attempts);
+  };
 
   const size = sizeBounds(requirements.rules, requirements.byteConvention);
   const width = dimensionBounds(requirements.rules, 'width');
@@ -184,7 +194,7 @@ export async function searchCandidates(context: SearchContext): Promise<SearchOu
       if (exhausted()) break;
 
       if (format === 'png') {
-        attempts += 1;
+        countAttempt();
         const result = await encode({ ...geometry, format });
         if (compliant(result.metadata, size, formats)) return { ok: true, result, attempts };
         if (size.max !== null && result.metadata.byteLength > size.max) sawTooLarge = true;
@@ -195,7 +205,7 @@ export async function searchCandidates(context: SearchContext): Promise<SearchOu
       // One probe at minimum quality gives the smallest file this geometry can
       // produce. If that is still over the limit, no quality setting rescues
       // it — reject the geometry for one attempt instead of seven.
-      attempts += 1;
+      countAttempt();
       const smallest = await encode({ ...geometry, format, quality: QUALITY_FLOOR });
       if (size.max !== null && smallest.metadata.byteLength > size.max) {
         sawTooLarge = true;
@@ -214,7 +224,7 @@ export async function searchCandidates(context: SearchContext): Promise<SearchOu
 
       for (let step = 0; step < BISECTION_STEPS && !exhausted(); step += 1) {
         const quality = Number(((low + high) / 2).toFixed(3));
-        attempts += 1;
+        countAttempt();
         const result = await encode({ ...geometry, format, quality });
 
         if (size.max !== null && result.metadata.byteLength > size.max) {

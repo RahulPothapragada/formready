@@ -121,6 +121,11 @@ Implemented and covered by tests:
 Implemented but not yet device-tested:
 
 - OCR worker wiring, image decode/render/encode, all four screens, export
+- **Preparation worker.** Decode, render, search, and verification all run off
+  the main thread, so progress and Cancel stay responsive (NFR-03). Verified in
+  a browser: the same 12 MP preparation blocks the main thread for 90 ms inline
+  versus 18 ms through the worker. Geometry is planned against the *rotated*
+  source shape, since a quarter turn swaps the aspect ratio.
 
 Built, but needs a phone to produce output:
 
@@ -133,11 +138,6 @@ Built, but needs a phone to produce output:
 
 Not started:
 
-- **Preparation worker.** The candidate search currently runs on the main
-  thread. `render()` is synchronous canvas work, so a large image will block the
-  UI and make Cancel unresponsive — which NFR-03 does not allow. The search
-  already takes its encoder as an injected function, so moving it behind a
-  worker is a wiring change rather than a rewrite.
 - Crop editor as a touch overlay (currently numeric inputs)
 - Held-out evaluation set and the results table
 - PWA icons and precached OCR assets

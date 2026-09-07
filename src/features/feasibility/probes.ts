@@ -21,6 +21,7 @@
 import { decode, encode, render } from '../../services/imageCodec';
 import { measure } from '../../services/verifier';
 import { recognize } from '../../services/ocr';
+import { prepareCandidate } from '../../services/preparation';
 import { searchCandidates } from '../preparation/generateCandidates';
 import type { ConfirmedRequirements, ImageFormat, Rule } from '../../domain/types';
 
@@ -32,6 +33,7 @@ export type ProbeId =
   | 'orientation'
   | 'ocr'
   | 'happy-path'
+  | 'worker-responsiveness'
   | 'export'
   | 'accelerator';
 
@@ -57,6 +59,46 @@ export interface ProbeResult {
 
 const ms = (value: number) => `${Math.round(value)} ms`;
 const mib = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+
+/**
+ * Times frame callbacks for the duration of `work`.
+ *
+ * The longest gap between frames is the longest the main thread was blocked,
+ * which is the longest a Cancel tap would have gone unnoticed. Used to compare
+ * running preparation inline against running it in the worker.
+ */
+async function whileSamplingMainThread<T>(
+  work: () => Promise<T>,
+): Promise<{ value: T; longestGapMs: number; frames: number; elapsedMs: number }> {
+  let sampling = true;
+  let longestGapMs = 0;
+  let frames = 0;
+  let previous = performance.now();
+
+  const sample = () => {
+    if (!sampling) return;
+    const at = performance.now();
+    longestGapMs = Math.max(longestGapMs, at - previous);
+    previous = at;
+    frames += 1;
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+
+  const startedAt = performance.now();
+  try {
+    const value = await work();
+    return { value, longestGapMs, frames, elapsedMs: performance.now() - startedAt };
+  } finally {
+    sampling = false;
+  }
+}
+
+/**
+ * A gap beyond this is long enough that a Cancel tap is visibly ignored. It is
+ * a usability threshold, not a rendering one.
+ */
+const RESPONSIVE_GAP_MS = 200;
 
 /**
  * Builds a synthetic source image on the device.
@@ -477,29 +519,33 @@ async function happyPathProbe(signal?: AbortSignal): Promise<ProbeResult> {
   };
 
   const source = await makeTestImage(3000, 4000); // 12 MP, typical phone camera
-  const startedAt = performance.now();
   const bitmap = await decode(source);
 
   try {
-    const outcome = await searchCandidates({
-      sourceWidth: bitmap.width,
-      sourceHeight: bitmap.height,
-      requirements,
-      signal,
-      encode: async (request) => {
-        const canvas = render({
-          bitmap,
-          crop: null,
-          rotation: 0,
-          targetWidth: request.width,
-          targetHeight: request.height,
-        });
-        const blob = await encode(canvas, request.format, request.quality);
-        return { blob, metadata: await measure(blob) };
-      },
-    });
+    const {
+      value: outcome,
+      longestGapMs,
+      elapsedMs: elapsed,
+    } = await whileSamplingMainThread(() =>
+      searchCandidates({
+        sourceWidth: bitmap.width,
+        sourceHeight: bitmap.height,
+        requirements,
+        signal,
+        encode: async (request) => {
+          const canvas = render({
+            bitmap,
+            crop: null,
+            rotation: 0,
+            targetWidth: request.width,
+            targetHeight: request.height,
+          });
+          const blob = await encode(canvas, request.format, request.quality);
+          return { blob, metadata: await measure(blob) };
+        },
+      }),
+    );
 
-    const elapsed = performance.now() - startedAt;
     const withinTarget = elapsed <= 15_000;
 
     return {
@@ -515,6 +561,9 @@ async function happyPathProbe(signal?: AbortSignal): Promise<ProbeResult> {
         { label: 'Total elapsed', value: ms(elapsed) },
         { label: 'Encode attempts used', value: String(outcome.attempts) },
         { label: 'Proposed target', value: '15,000 ms' },
+        // Baseline for the worker probe below: this is what the same work
+        // costs the main thread when it is not moved off it.
+        { label: 'Longest main-thread gap (inline)', value: ms(longestGapMs) },
         ...(outcome.ok
           ? [
               { label: 'Output size', value: `${outcome.result.metadata.byteLength.toLocaleString('en-US')} bytes` },
@@ -529,6 +578,70 @@ async function happyPathProbe(signal?: AbortSignal): Promise<ProbeResult> {
   } finally {
     bitmap.close();
   }
+}
+
+/**
+ * Runs preparation through the worker while sampling the main thread.
+ *
+ * This is the probe for NFR-03, and it measures the claim directly rather than
+ * asserting it: frame callbacks are timed throughout the run, so the longest
+ * gap is the longest the UI was unresponsive. If the work were still on the
+ * main thread, a 12 MP render would show up here as gaps of hundreds of
+ * milliseconds — which is exactly how long Cancel would ignore a tap.
+ */
+async function workerResponsivenessProbe(signal?: AbortSignal): Promise<ProbeResult> {
+  const requirements: ConfirmedRequirements = {
+    rules: HAPPY_PATH_RULES,
+    byteConvention: 'decimal',
+    manualChecks: [],
+    documentKind: 'photo',
+    confirmedAt: 0,
+  };
+
+  const source = await makeTestImage(3000, 4000);
+
+  const {
+    value: outcome,
+    longestGapMs,
+    frames,
+    elapsedMs: elapsed,
+  } = await whileSamplingMainThread(() =>
+    prepareCandidate({
+      jobRevision: 0,
+      source,
+      crop: null,
+      rotation: 0,
+      requirements,
+      signal,
+    }),
+  );
+
+  const responsive = longestGapMs < RESPONSIVE_GAP_MS;
+
+  return {
+    id: 'worker-responsiveness',
+    label: 'Main thread stays responsive during preparation',
+    status: outcome.ok && responsive ? 'pass' : 'fail',
+    detail: !outcome.ok
+      ? `Preparation did not produce a candidate (${outcome.failure.kind}). Investigate before reading the responsiveness number.`
+      : responsive
+        ? 'The main thread was never blocked long enough for Cancel to feel unresponsive.'
+        : 'The main thread stalled long enough that Cancel would be ignored. Check that the preparation worker is actually being used.',
+    measurements: [
+      { label: 'Longest main-thread gap', value: ms(longestGapMs) },
+      { label: 'Frames observed', value: String(frames) },
+      { label: 'Total elapsed', value: ms(elapsed) },
+      ...(outcome.ok
+        ? [
+            { label: 'Encode attempts used', value: String(outcome.attempts) },
+            {
+              label: 'Output',
+              value: `${outcome.metadata.byteLength.toLocaleString('en-US')} bytes, ${outcome.metadata.width} × ${outcome.metadata.height}`,
+            },
+          ]
+        : []),
+    ],
+  };
 }
 
 /** Which export routes exist on this browser. Download must always work. */
@@ -618,6 +731,12 @@ export async function runFeasibilitySuite(options: SuiteOptions): Promise<ProbeR
     ['accelerator', 'Accelerator availability', () => acceleratorProbe(), false],
     ['decode-ceiling', 'Decode ceiling', () => decodeCeilingProbe(signal), true],
     ['happy-path', 'Warm happy path (12 MP source)', () => happyPathProbe(signal), true],
+    [
+      'worker-responsiveness',
+      'Main thread stays responsive during preparation',
+      () => workerResponsivenessProbe(signal),
+      true,
+    ],
     ['ocr', 'OCR cold start and warm run', () => ocrProbe(signal), true],
   ];
 

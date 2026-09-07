@@ -139,6 +139,24 @@ export async function encode(
 }
 
 /**
+ * Source dimensions as they appear after the approved rotation.
+ *
+ * A quarter turn swaps width and height, so the candidate search must plan
+ * geometry against the rotated shape. Planning against the unrotated one
+ * produces target boxes with the wrong aspect ratio, which `render()` then
+ * stretches into — exactly the silent distortion FR-07 forbids.
+ */
+export function orientedSize(
+  width: number,
+  height: number,
+  rotation: 0 | 90 | 180 | 270,
+): { width: number; height: number } {
+  return rotation === 90 || rotation === 270
+    ? { width: height, height: width }
+    : { width, height };
+}
+
+/**
  * Largest box inside `bounds` that keeps the source aspect ratio.
  * Used to avoid stretching a face or a signature when only a maximum is given.
  */

@@ -38,7 +38,21 @@ only because the run found two real defects:
 
 Desktop results, for reference only: 24 MP decode ceiling, JPEG size monotonic
 across six quality steps, PNG identical at quality 0.1 and 0.95 (753,626 bytes
-both times), EXIF orientation applied on decode, warm happy path 803 ms.
+both times), EXIF orientation applied on decode, warm happy path ~750 ms.
+
+Main-thread blocking on the same 12 MP preparation, both runs producing an
+identical 48,466-byte 750×1000 output in 13 attempts:
+
+| Path | Longest main-thread gap |
+| --- | --- |
+| Inline (happy-path probe) | 90 ms |
+| Through the worker | 18 ms — one frame |
+
+Read that gap as a floor, not a result. A laptop encodes a 12 MP image in a
+fraction of the time a phone does, so 90 ms inline is low enough that the
+desktop run would have *passed* the 200 ms responsiveness threshold. The
+problem the worker solves is only visible on the device, which is the whole
+reason this document waits for a phone.
 
 ### Watch for a stale service worker
 
@@ -68,9 +82,16 @@ happen on the demo phone.
 | PNG quality no-op | Whether the quality argument changes PNG size | The PNG branch and its separate failure kind |
 | EXIF orientation | Whether decode applies orientation | Whether the crop editor can use decoded coordinates |
 | OCR | Cold start and warm run, separately | FR-15, NFR-06, and the offline claim |
-| Warm happy path | Decode → render → search → verify, 12 MP source | The NFR-08 15-second target |
+| Warm happy path | Decode → render → search → verify, 12 MP source, run inline | The NFR-08 15-second target |
+| Worker responsiveness | Longest main-thread stall while preparing through the worker | NFR-03, and whether Cancel is usable |
 | Export | Anchor download and Web Share availability | FR-13 and the P1 share feature |
 | Accelerator | WebGPU adapter presence | The P1 browser-model go/no-go |
+
+The last two of those are a deliberate pair: the happy-path probe runs the
+pipeline **inline** and the worker probe runs the same work **through the
+worker**, both sampling frame callbacks. The difference between their
+"longest main-thread gap" numbers is the value of moving preparation off the
+main thread, measured rather than asserted.
 
 Two of these are correctness probes rather than performance ones, and they are
 the ones worth watching:
