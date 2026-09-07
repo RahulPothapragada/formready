@@ -78,6 +78,25 @@ describe('geometry ladder', () => {
     expect(ladder[0].width / ladder[0].height).toBeCloseTo(2);
   });
 
+  it('descends far enough to reach a tight byte budget from a phone photo', () => {
+    // A 12 MP source squeezed into ~50 KB lands near 600×800. A ladder that
+    // bottoms out around half size never gets there.
+    const ladder = geometryLadder(3000, 4000, { min: null, max: null }, { min: null, max: null });
+    const smallest = ladder[ladder.length - 1];
+
+    expect(smallest.width).toBeLessThanOrEqual(400);
+    expect(smallest.width * smallest.height).toBeLessThan(3000 * 4000 * 0.02);
+  });
+
+  it('descends monotonically and keeps the aspect ratio at every step', () => {
+    const ladder = geometryLadder(3000, 4000, { min: null, max: null }, { min: null, max: null });
+
+    for (let index = 1; index < ladder.length; index += 1) {
+      expect(ladder[index].width).toBeLessThan(ladder[index - 1].width);
+      expect(ladder[index].width / ladder[index].height).toBeCloseTo(0.75, 1);
+    }
+  });
+
   it('stops descending once a minimum dimension would be breached', () => {
     const ladder = geometryLadder(400, 400, { min: 380, max: 400 }, { min: 380, max: 400 });
     expect(ladder.every((step) => step.width >= 380)).toBe(true);
@@ -130,6 +149,41 @@ describe('JPEG search', () => {
     expect(outcome.result.metadata.byteLength).toBeLessThan(50_000);
   });
 
+  it('finds a candidate for a tight budget from a full phone photo', async () => {
+    // The case the device harness caught: 12 MP source, 20–50 KB window, no
+    // dimension rules. Only reachable if the ladder descends far enough.
+    const outcome = await searchCandidates({
+      sourceWidth: 3000,
+      sourceHeight: 4000,
+      requirements: requirements([JPEG_ONLY, size('min', 'gte', 20), size('max', 'lte', 50)]),
+      encode: fakeEncoder(),
+      now: clock,
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.metadata.byteLength).toBeGreaterThanOrEqual(20_000);
+    expect(outcome.result.metadata.byteLength).toBeLessThanOrEqual(50_000);
+    expect(outcome.attempts).toBeLessThanOrEqual(DEFAULT_BUDGET.maxAttempts);
+  });
+
+  it('rejects a hopeless geometry in one attempt rather than bisecting it', async () => {
+    const encode = vi.fn(fakeEncoder());
+    await searchCandidates({
+      sourceWidth: 3000,
+      sourceHeight: 4000,
+      requirements: requirements([JPEG_ONLY, size('max', 'lte', 50)]),
+      encode,
+      now: clock,
+    });
+
+    // Every call that is not the final bisection run should sit at the quality
+    // floor — the cheap probe that proves a geometry cannot work.
+    const qualities = encode.mock.calls.map((call) => call[0].quality);
+    const floorProbes = qualities.filter((quality) => quality === 0.2).length;
+    expect(floorProbes).toBeGreaterThan(1);
+  });
+
   it('bisects rather than sweeping, so it stays well inside the attempt budget', async () => {
     const encode = vi.fn(fakeEncoder());
     const outcome = await searchCandidates({
@@ -146,12 +200,51 @@ describe('JPEG search', () => {
 });
 
 describe('PNG search', () => {
-  it('reports that PNG size cannot be tuned when no geometry fits', async () => {
+  it('shrinks to fit when the geometry is free to move', async () => {
+    // With no dimension rules, PNG can still meet a size limit by getting
+    // smaller — geometry is a real lever even though quality is not.
     const outcome = await searchCandidates({
       sourceWidth: 800,
       sourceHeight: 920,
-      // PNG at any permitted size is far above 50 KB with this encoder.
       requirements: requirements([PNG_ONLY, size('max', 'lte', 50)]),
+      encode: fakeEncoder(),
+      now: clock,
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.metadata.format).toBe('png');
+    expect(outcome.result.metadata.byteLength).toBeLessThanOrEqual(50_000);
+  });
+
+  it('reports the PNG dead-end when dimensions are pinned', async () => {
+    // "PNG, exactly 200 × 230, under 20 KB" — the geometry cannot move and the
+    // quality argument does nothing, so no file satisfies this.
+    const exact: Rule[] = [
+      {
+        id: 'w',
+        field: 'width',
+        operator: 'eq',
+        value: 200,
+        unit: 'px',
+        origin: 'extracted',
+        reviewState: 'confirmed',
+      },
+      {
+        id: 'h',
+        field: 'height',
+        operator: 'eq',
+        value: 230,
+        unit: 'px',
+        origin: 'extracted',
+        reviewState: 'confirmed',
+      },
+    ];
+
+    const outcome = await searchCandidates({
+      sourceWidth: 800,
+      sourceHeight: 920,
+      requirements: requirements([PNG_ONLY, size('max', 'lte', 20), ...exact]),
       encode: fakeEncoder(),
       now: clock,
     });
@@ -160,6 +253,8 @@ describe('PNG search', () => {
     if (outcome.ok) return;
     expect(outcome.failure.kind).toBe('png-size-not-controllable');
     expect(outcome.failure.suggestions).toContain('review-requirements');
+    // One geometry, one attempt — there is nothing else to try.
+    expect(outcome.attempts).toBe(1);
   });
 
   it('prefers JPEG when both formats are allowed, since only it has a size lever', async () => {

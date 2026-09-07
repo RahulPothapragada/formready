@@ -101,6 +101,7 @@ src/
     preparation/   bounded candidate search
     review/        checklist, visual review, export gate
     demo/          clearly-labelled demo upload checker
+    feasibility/   device probe harness (work package 1)
   services/     ocr, imageCodec, verifier, exportFile, modelParser
   workers/      OCR and preparation workers
 tests/          deterministic suites (no browser required)
@@ -121,9 +122,17 @@ Implemented but not yet device-tested:
 
 - OCR worker wiring, image decode/render/encode, all four screens, export
 
+Built, but needs a phone to produce output:
+
+- **Feasibility harness** at `/feasibility` (work package 1). Measures the
+  decode ceiling, JPEG quality monotonicity, the PNG quality no-op, EXIF
+  orientation handling, OCR cold versus warm, the warm happy path, export
+  routes, and WebGPU availability — then derives the scope-freeze decisions
+  those measurements force. Fill in [`docs/feasibility.md`](docs/feasibility.md)
+  from its JSON report before starting work package 2.
+
 Not started:
 
-- The 2-hour device feasibility check that gates the optional browser LLM
 - **Preparation worker.** The candidate search currently runs on the main
   thread. `render()` is synchronous canvas work, so a large image will block the
   UI and make Cancel unresponsive — which NFR-03 does not allow. The search
@@ -148,7 +157,11 @@ synthetic encoder that models JPEG size as a function of pixels and quality, and
 PNG as a function of pixels alone — which is what makes PNG size limits hard.
 
 Browser-dependent paths (decode, render, encode, download) need device testing
-and are not covered here.
+and are not covered here — that is what `/feasibility` is for.
+
+```bash
+npm run dev   # then open /feasibility on the phone, not the laptop
+```
 
 ## Specification
 

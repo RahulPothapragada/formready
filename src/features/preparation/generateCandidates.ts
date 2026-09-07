@@ -77,6 +77,13 @@ const QUALITY_CEILING = 0.95;
 const BISECTION_STEPS = 7;
 
 /**
+ * Linear scale factors, largest first, spanning full size down to 12% — about
+ * 1.4% of the original pixel count. Roughly geometric, so the steps stay
+ * meaningful at both ends rather than crowding near 1.0.
+ */
+const GEOMETRY_SCALES = [1, 0.8, 0.62, 0.48, 0.35, 0.25, 0.17, 0.12];
+
+/**
  * Candidate output sizes, largest first.
  *
  * An exact width and height is honoured as given — the crop screen has already
@@ -97,14 +104,17 @@ export function geometryLadder(
   const start = fitWithinAspect(sourceWidth, sourceHeight, width.max, height.max);
   const ladder: Array<{ width: number; height: number }> = [];
 
-  // Six steps of ~12% linear reduction reaches roughly a quarter of the
-  // original pixel count, which covers most real size limits.
-  for (let step = 0; step < 6; step += 1) {
-    const scale = Math.pow(0.88, step);
+  // The range matters more than the step count. A 12 MP phone photo squeezed
+  // into 50 KB typically needs something near 600×800 — around 15% of the
+  // original linear size. A ladder that bottoms out at half size never reaches
+  // the answer and spends the whole attempt budget proving it.
+  for (const scale of GEOMETRY_SCALES) {
     const candidate = {
       width: Math.max(1, Math.round(start.width * scale)),
       height: Math.max(1, Math.round(start.height * scale)),
     };
+    // Stop descending once a confirmed minimum dimension would be breached;
+    // everything below this point is smaller still.
     if (width.min !== null && candidate.width < width.min) break;
     if (height.min !== null && candidate.height < height.min) break;
     ladder.push(candidate);
@@ -182,33 +192,55 @@ export async function searchCandidates(context: SearchContext): Promise<SearchOu
         continue;
       }
 
-      // Bisect quality for the largest file that still fits the upper bound.
+      // One probe at minimum quality gives the smallest file this geometry can
+      // produce. If that is still over the limit, no quality setting rescues
+      // it — reject the geometry for one attempt instead of seven.
+      attempts += 1;
+      const smallest = await encode({ ...geometry, format, quality: QUALITY_FLOOR });
+      if (size.max !== null && smallest.metadata.byteLength > size.max) {
+        sawTooLarge = true;
+        continue;
+      }
+
+      let best: EncodeResult | null = compliant(smallest.metadata, size, formats)
+        ? smallest
+        : null;
+      let underMinHere = size.min !== null && smallest.metadata.byteLength < size.min;
+
+      // Push quality up as far as the upper bound allows: among compliant
+      // candidates, the larger file retains more detail.
       let low = QUALITY_FLOOR;
       let high = QUALITY_CEILING;
-      let best: EncodeResult | null = null;
 
       for (let step = 0; step < BISECTION_STEPS && !exhausted(); step += 1) {
         const quality = Number(((low + high) / 2).toFixed(3));
         attempts += 1;
         const result = await encode({ ...geometry, format, quality });
 
-        if (compliant(result.metadata, size, formats)) {
-          // Keep searching upward: a compliant larger file retains more detail.
-          best = result;
-          low = quality;
-          continue;
-        }
-
         if (size.max !== null && result.metadata.byteLength > size.max) {
           sawTooLarge = true;
           high = quality;
-        } else {
-          sawTooSmall = true;
-          low = quality;
+          continue;
+        }
+
+        low = quality;
+        if (compliant(result.metadata, size, formats)) {
+          best = result;
+          underMinHere = false;
+        } else if (size.min !== null && result.metadata.byteLength < size.min) {
+          underMinHere = true;
         }
       }
 
       if (best) return { ok: true, result: best, attempts };
+
+      if (underMinHere) {
+        // Even at the top of the quality range this geometry stayed under the
+        // size floor. Every smaller geometry produces fewer bytes still, so
+        // descending further cannot help.
+        sawTooSmall = true;
+        break;
+      }
     }
   }
 

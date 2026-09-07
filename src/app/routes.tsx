@@ -4,6 +4,7 @@ import DocumentPage from '../features/capture/DocumentPage';
 import PreparePage from '../features/preparation/PreparePage';
 import ReviewPage from '../features/review/ReviewPage';
 import DemoPortalPage from '../features/demo/DemoPortalPage';
+import FeasibilityPage from '../features/feasibility/FeasibilityPage';
 
 /** The four workflow screens, plus the clearly-separated demo checker. */
 export const STEPS = [
@@ -23,6 +24,8 @@ export default function AppRoutes() {
       <Route path="/review" element={<ReviewPage />} />
       {/* Outside the product journey; labelled as a demo, never as a portal. */}
       <Route path="/demo-upload-checker" element={<DemoPortalPage />} />
+      {/* Engineering harness for work package 1. Not linked from the journey. */}
+      <Route path="/feasibility" element={<FeasibilityPage />} />
       <Route path="*" element={<Navigate to="/requirements" replace />} />
     </Routes>
   );

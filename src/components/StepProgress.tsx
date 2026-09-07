@@ -4,7 +4,10 @@ import { STEPS } from '../app/routes';
 /** Position indicator for the four-step journey. Hidden on the demo page. */
 export default function StepProgress() {
   const { pathname } = useLocation();
-  if (pathname.startsWith('/demo-upload-checker')) return null;
+  // Neither the demo checker nor the engineering harness is part of the journey.
+  if (pathname.startsWith('/demo-upload-checker') || pathname.startsWith('/feasibility')) {
+    return null;
+  }
 
   const currentIndex = STEPS.findIndex((step) => step.path === pathname);
 
