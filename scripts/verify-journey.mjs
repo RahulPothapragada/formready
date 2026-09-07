@@ -328,6 +328,37 @@ async function runJourney(page, downloadDir) {
   }
   record('Approved framing');
 
+  // Reload before preparing. Persistence is worth nothing unless the work
+  // survives the thing it exists to survive.
+  await sleep(700); // let the debounced save land
+  await page.send('Page.navigate', { url: `${BASE}/document` });
+  await sleep(2500);
+
+  await waitFor(page, `!!document.querySelector('.document-page')`, 'the document screen after reload');
+  const survived = await page.evaluate(`
+    (() => {
+      const dd = [...document.querySelectorAll('.metadata dd')].map((d) => d.innerText);
+      return {
+        rules: document.querySelectorAll('.target-summary li').length,
+        dimensions: dd.find((t) => t.includes('pixels')) ?? '',
+        saved: document.querySelector('.saved-indicator')?.innerText ?? '',
+      };
+    })()`);
+
+  if (survived.rules === 0) throw new Error('Confirmed requirements did not survive the reload.');
+  if (!survived.dimensions.includes('1200')) {
+    throw new Error(`The document did not survive the reload: ${JSON.stringify(survived)}`);
+  }
+  if (!/saved/i.test(survived.saved)) {
+    throw new Error(`No saved indicator after reload: ${survived.saved}`);
+  }
+  record('Work survived a reload', `${survived.rules} rules · ${survived.dimensions}`);
+
+  // Re-approve framing on the restored job and carry on.
+  if (!(await page.evaluate(clickByText('Use the whole image')))) {
+    throw new Error('Could not approve framing after the reload.');
+  }
+
   // Preparation runs in the worker; the app navigates to review on success.
   await waitFor(
     page,
@@ -395,6 +426,32 @@ async function runJourney(page, downloadDir) {
   const done = await page.evaluate(`!!document.querySelector('.done')`);
   if (!done) throw new Error('The post-export confirmation never appeared.');
   record('Post-export confirmation shown');
+
+  // Saving without being asked is only acceptable if deleting is one tap and
+  // actually deletes.
+  await page.evaluate(`document.querySelector('.saved-indicator .link').click(); true`);
+  await sleep(300);
+  await page.evaluate(`
+    [...document.querySelectorAll('.saved-indicator.confirming button')]
+      .find((b) => b.textContent.includes('Delete it')).click(); true`);
+  await sleep(800);
+
+  await page.send('Page.navigate', { url: `${BASE}/requirements` });
+  await sleep(2500);
+  const afterDelete = await page.evaluate(`
+    (() => ({
+      rules: document.querySelectorAll('.requirement').length,
+      text: document.querySelector('textarea')?.value ?? '',
+      indicator: document.querySelector('.saved-indicator')?.innerText ?? '',
+    }))()`);
+
+  if (afterDelete.rules !== 0 || afterDelete.text !== '') {
+    throw new Error(`Delete left work behind: ${JSON.stringify(afterDelete)}`);
+  }
+  if (afterDelete.indicator !== '') {
+    throw new Error('The saved indicator still claims work is stored after deleting it.');
+  }
+  record('Delete removed the saved work for good');
 
   return { downloaded, size: info.size };
 }

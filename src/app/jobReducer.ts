@@ -65,7 +65,9 @@ export type JobAction =
   | { type: 'CANCEL_PREPARATION' }
   | { type: 'SET_USER_REVIEW'; review: UserReview }
   | { type: 'MARK_EXPORTED' }
-  | { type: 'CLEAR_JOB'; nextId: string };
+  | { type: 'CLEAR_JOB'; nextId: string }
+  /** Replaces state wholesale with a job read back from device storage. */
+  | { type: 'RESTORE_JOB'; job: Job };
 
 /**
  * Bumps the revision and discards everything derived from the previous one.
@@ -230,6 +232,11 @@ export function jobReducer(job: Job, action: JobAction): Job {
 
     case 'CLEAR_JOB':
       return createJob(action.nextId);
+
+    case 'RESTORE_JOB':
+      // The snapshot has already been version-checked and had any in-flight
+      // status normalised, so it is adopted as-is rather than merged.
+      return action.job;
   }
 }
 

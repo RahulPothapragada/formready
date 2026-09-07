@@ -771,3 +771,52 @@ button.link {
 .crop-precise .crop-fields { margin-top: 0.5rem; }
 
 .crop-editor .actions button { flex: 1; }
+
+
+/* --- Saved indicator ---------------------------------------------------- */
+
+.hydrating {
+  max-width: 34rem;
+  margin: 3rem auto;
+  padding: 0 1rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.saved-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.saved-indicator span { flex: 1 1 12rem; }
+.saved-indicator .link { flex: none; font-size: 0.8125rem; min-height: 44px; }
+
+/* Saving silently is a promise; failing silently would be a lie. */
+.saved-indicator.unavailable {
+  border-color: var(--warn);
+  color: var(--text);
+}
+
+.saved-indicator.unavailable strong { color: var(--warn); }
+
+.saved-indicator.confirming {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.625rem;
+  border-color: var(--fail);
+  color: var(--text);
+  font-size: 0.9375rem;
+}
+
+.saved-indicator.confirming p { margin: 0; }
+.saved-indicator.confirming .actions button { flex: 1; }

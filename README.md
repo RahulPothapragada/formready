@@ -75,6 +75,14 @@ generic "couldn't find a suitable file".
 source spans. The user ticks what applies. Contradictory rules block
 confirmation outright.
 
+**Saving is automatic, deleting is one tap.** The specification puts persistence
+behind an explicit Save button. That is exactly useless in the case that
+matters — an accidental reload is when nobody pressed Save — so the job is
+mirrored to IndexedDB as you go. What the specification was protecting is kept:
+the app says plainly that the document is on this device, offers a visible
+Delete, and never claims recovery it cannot provide. When saving fails, it says
+so rather than staying quiet.
+
 ## Getting started
 
 ```bash
@@ -137,6 +145,11 @@ Verified in a real browser (headless Chrome), but not yet on a phone:
   reaches disk.
 - The same journey against the dev server (`verify:journey:dev`), where React
   double-invokes effects — a mode the production build does not exercise.
+- **Work survives a reload.** The job — including the original document and the
+  prepared candidate — is mirrored to IndexedDB as you go and restored on load.
+  The journey proves it: it reloads the page mid-flow, checks the confirmed
+  rules and the document are still there, carries on to a download, then deletes
+  the saved work and checks it is really gone.
 - **Direct-manipulation cropping.** Drag to move, pinch or drag a corner to
   resize, with the shape locked when the rules pin exact dimensions. The
   rotation conversion — the editor shows the rotated view, the pipeline crops
