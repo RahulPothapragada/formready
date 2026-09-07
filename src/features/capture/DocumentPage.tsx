@@ -37,10 +37,14 @@ export default function DocumentPage() {
 
     try {
       const bitmap = await decode(file);
-      const pixels = bitmap.width * bitmap.height;
+      // Read the dimensions before closing: `close()` releases the bitmap and
+      // its width and height both become 0 afterwards. Reading them after the
+      // close stored a 0x0 source, which showed as "0 × 0 pixels" on this
+      // screen and gave the crop editor a zero-sized rectangle to work from.
+      const { width, height } = bitmap;
       bitmap.close();
 
-      if (pixels > MAX_INPUT_PIXELS) {
+      if (width * height > MAX_INPUT_PIXELS) {
         setError('This image is too large for this phone to prepare. Choose a smaller one.');
         return;
       }
@@ -52,8 +56,8 @@ export default function DocumentPage() {
           blob: file,
           filename: file.name,
           decodedFormat: format,
-          width: bitmap.width,
-          height: bitmap.height,
+          width,
+          height,
           // decode() already applied EXIF orientation, so the stored dimensions
           // are the visual ones and this is retained only for diagnostics.
           orientation: 1,

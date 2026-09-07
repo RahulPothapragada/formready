@@ -12,9 +12,13 @@
   --muted: #5a6070;
   --border: #d6d9e0;
   --accent: #1d4ed8;
+  --accent-ink: #ffffff;
+  --accent-wash: #eef3fe;
   --pass: #15803d;
   --fail: #b91c1c;
   --warn: #a16207;
+  --shadow: 0 1px 2px rgba(16, 20, 30, 0.06), 0 8px 24px -12px rgba(16, 20, 30, 0.18);
+  --radius: 0.75rem;
 
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -30,9 +34,12 @@
     --muted: #a2a8b8;
     --border: #343945;
     --accent: #7ba2ff;
+    --accent-ink: #0d1220;
+    --accent-wash: #1a2334;
     --pass: #4ade80;
     --fail: #f87171;
     --warn: #fbbf24;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
   }
 }
 
@@ -46,6 +53,12 @@ body {
   color: var(--text);
   /* Section 4: no horizontal scrolling at any supported width. */
   overflow-x: hidden;
+  /* Installed to a home screen, the app sits under the notch and the home
+     indicator, so the shell has to inset itself. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button,
@@ -55,6 +68,18 @@ textarea {
   font: inherit;
   color: inherit;
   min-height: 44px;
+}
+
+/* Checkboxes and radios are not text fields: the 44px minimum above turns them
+   into oversized circles and breaks the rows they sit in. The touch target is
+   the surrounding label instead. */
+input[type='checkbox'],
+input[type='radio'] {
+  min-height: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+  accent-color: var(--accent);
 }
 
 button {

@@ -6,10 +6,11 @@ A phone-first web app that reads the upload instructions in front of you, turns
 them into explicit checks you confirm, prepares your document against them, and
 then independently re-reads the produced file before letting you export it.
 
-> **Status:** early implementation. The domain core, job state machine, rule
-> extraction, and candidate search are implemented and tested. The screens are
-> wired to real logic but have not been through device testing. Nothing here has
-> been validated on a phone yet — see [Current state](#current-state).
+> **Status:** working prototype for the iQOO submission round — not the final
+> hackathon build. The complete journey runs end to end: instructions in,
+> checked file downloaded, verified automatically in a real browser against both
+> the production build and the dev server. Nothing has been validated on a phone
+> yet — see [Current state](#current-state).
 
 ---
 
@@ -129,14 +130,22 @@ Implemented and covered by tests:
 
 Verified in a real browser (headless Chrome), but not yet on a phone:
 
+- **The complete journey**, driven by `npm run verify:journey`: type
+  instructions, extract and confirm rules, upload a document, approve framing,
+  prepare, review, download. Twelve asserted steps including that Download stays
+  disabled until the visual review is acknowledged, and that the file actually
+  reaches disk.
+- The same journey against the dev server (`verify:journey:dev`), where React
+  double-invokes effects — a mode the production build does not exercise.
 - OCR end to end, including offline. All five key tokens read from rendered
   instruction text; cold 190-600 ms, warm 74 ms.
 - The offline claim: assets cached on first use, network cut, OCR and
   preparation still work.
 
-Implemented but not yet browser- or device-tested:
+Implemented but not yet exercised by a human:
 
-- All four screens and the export flow
+- Every screen has been driven by the automated journey, but nobody has used the
+  app by hand on a touch device.
 - **Preparation worker.** Decode, render, search, and verification all run off
   the main thread, so progress and Cancel stay responsive (NFR-03). Verified in
   a browser: the same 12 MP preparation blocks the main thread for 90 ms inline
@@ -154,7 +163,8 @@ Built, but needs a phone to produce output:
 
 Not started:
 
-- Crop editor as a touch overlay (currently numeric inputs)
+- Crop editor as a touch overlay (currently numeric inputs, seeded correctly but
+  awkward on a phone)
 - Held-out evaluation set and the results table
 
 Deliberately excluded from v1: PDFs, accounts, batch mode, payments, native NPU
@@ -176,9 +186,15 @@ cannot run in Node. They are covered by driving a real browser instead:
 
 ```bash
 npm run build
-npm run verify:browser   # runs the probe suite in headless Chrome
-npm run verify:offline   # loads online, cuts the network, re-runs
+npm run verify:journey       # the whole user journey, instructions to download
+npm run verify:journey:dev   # the same, with React Strict Mode active
+npm run verify:browser       # the device probe suite
+npm run verify:offline       # loads online, cuts the network, re-runs
 ```
+
+`verify:journey` is the one that matters most: every screen and service was
+verified separately long before the seam between them was, and that seam is
+where the bugs were.
 
 `verify:offline` is the honest test of FR-15: it loads the app once so the
 service worker caches its assets, cuts the network at the browser level, then

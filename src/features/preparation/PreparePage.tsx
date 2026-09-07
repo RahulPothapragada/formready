@@ -24,14 +24,23 @@ export default function PreparePage() {
   const navigate = useNavigate();
   const [progress, setProgress] = useState<PrepareProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // Guards against a second run when React re-invokes the effect.
-  const startedRevision = useRef<number | null>(null);
+  /**
+   * The revision currently being prepared, so a re-render does not start a
+   * second run for the same one.
+   *
+   * It is cleared by the cleanup below rather than being left set. In
+   * development React mounts effects twice — mount, clean up, mount again — and
+   * a guard that survived the first cleanup would leave the second mount
+   * refusing to start anything, with the first run already aborted. The screen
+   * then waits forever on preparation that is not happening.
+   */
+  const inFlightRevision = useRef<number | null>(null);
 
   useEffect(() => {
     if (!job.confirmed || !job.source || !job.transform) return;
     if (job.candidate || job.failure) return;
-    if (startedRevision.current === job.revision) return;
-    startedRevision.current = job.revision;
+    if (inFlightRevision.current === job.revision) return;
+    inFlightRevision.current = job.revision;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -76,7 +85,13 @@ export default function PreparePage() {
       navigate('/review');
     })();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      // Release the guard so a remount can start again. Without this, the
+      // second of React's development double-mounts finds the revision already
+      // claimed and never runs.
+      if (inFlightRevision.current === revision) inFlightRevision.current = null;
+    };
   }, [job, dispatch, navigate]);
 
   if (job.failure) return <RecoveryPanel failure={job.failure} />;

@@ -57,6 +57,28 @@ export async function verify(
 }
 
 /**
+ * Last check before the bytes leave the app (NFR-09).
+ *
+ * Re-decodes the candidate and confirms it still measures the way the report
+ * says it does. The report is what the user was shown and what the export gate
+ * was opened on; this makes sure the file being handed over is the file that
+ * was described, rather than trusting that nothing swapped underneath.
+ */
+export async function stillMatchesReport(candidate: Candidate): Promise<boolean> {
+  try {
+    const measured = await measure(candidate.blob);
+    return (
+      measured.format === candidate.metadata.format &&
+      measured.byteLength === candidate.metadata.byteLength &&
+      measured.width === candidate.metadata.width &&
+      measured.height === candidate.metadata.height
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Post-export integrity check (NFR-09): re-reads what actually left the app and
  * confirms it is byte-identical to what was verified.
  */

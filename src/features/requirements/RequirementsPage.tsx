@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FilePicker from '../../components/FilePicker';
 import RequirementEditor from './RequirementEditor';
+import AddRequirement from './AddRequirement';
 import { extractRules, type Ambiguity } from './extractRules';
 import { useJob } from '../../app/JobContext';
 import { findConflicts } from '../../domain/constraints';
@@ -45,8 +46,24 @@ export default function RequirementsPage() {
     setAmbiguities(result.ambiguities);
   };
 
+  /**
+   * Bumped by every user action that sets the instruction text. OCR captures
+   * the value when it starts and checks it again when it finishes: if the user
+   * typed in the meantime, the finished result is dropped instead of
+   * overwriting what they wrote. Without this, starting OCR and then typing
+   * loses the typing the moment recognition lands.
+   */
+  const inputGeneration = useRef(0);
+  const ocrAbort = useRef<AbortController | null>(null);
+
   const handleScreenshot = async (file: File) => {
     const sourceId = crypto.randomUUID();
+    const generation = (inputGeneration.current += 1);
+
+    ocrAbort.current?.abort();
+    const controller = new AbortController();
+    ocrAbort.current = controller;
+
     setOcrError(null);
     dispatch({
       type: 'ADD_INSTRUCTIONS',
@@ -56,8 +73,12 @@ export default function RequirementsPage() {
     try {
       const outcome = await recognize(file, {
         jobId: sourceId,
+        signal: controller.signal,
         onProgress: (progress) => setOcrStage(progress.stage),
       });
+
+      if (generation !== inputGeneration.current) return;
+
       dispatch({
         type: 'ADD_INSTRUCTIONS',
         source: {
@@ -70,14 +91,20 @@ export default function RequirementsPage() {
       });
       runExtraction(outcome.text, sourceId);
     } catch {
+      if (generation !== inputGeneration.current) return;
       // OCR failure is recoverable: the text area below stays available.
       setOcrError('Paste the instructions or enter the file requirements.');
     } finally {
-      setOcrStage(null);
+      if (generation === inputGeneration.current) setOcrStage(null);
     }
   };
 
   const handlePaste = (value: string) => {
+    // Typing supersedes any recognition still running: the user has taken over.
+    inputGeneration.current += 1;
+    ocrAbort.current?.abort();
+    setOcrStage(null);
+
     const sourceId = job.instructionSource?.id ?? crypto.randomUUID();
     if (!job.instructionSource) {
       dispatch({
@@ -152,7 +179,7 @@ export default function RequirementsPage() {
       <h3>Requirements found</h3>
       {job.proposedRules.length === 0 ? (
         <p className="hint">
-          No supported requirement found yet. Add the instructions above, or set a target yourself.
+          No supported requirement found yet. Add the instructions above, or add a target yourself.
         </p>
       ) : (
         <ul className="requirement-list">
@@ -167,6 +194,8 @@ export default function RequirementsPage() {
           ))}
         </ul>
       )}
+
+      <AddRequirement onAdd={(rule) => dispatch({ type: 'UPDATE_RULE', rule })} />
 
       {ambiguities.length > 0 ? (
         <section className="ambiguities">

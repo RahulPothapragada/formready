@@ -6,6 +6,7 @@ import { useJob } from '../../app/JobContext';
 import { canExport } from '../../app/jobReducer';
 import { formatBytes } from '../../domain/constraints';
 import { buildFilename, canShare, download, share } from '../../services/exportFile';
+import { stillMatchesReport } from '../../services/verifier';
 
 /**
  * Screen 4. The last point at which the user can see what they are about to
@@ -67,6 +68,15 @@ export default function ReviewPage() {
   const runExport = async (method: 'download' | 'share') => {
     setExportError(null);
     try {
+      // NFR-09: confirm the bytes about to leave still measure the way the
+      // checklist above says they do, so what is exported is what was verified.
+      if (!(await stillMatchesReport(job.candidate!))) {
+        setExportError(
+          'This file no longer matches the checks shown above. Prepare it again before downloading.',
+        );
+        return;
+      }
+
       const outcome =
         method === 'share'
           ? await share(job.candidate!.blob, filename)

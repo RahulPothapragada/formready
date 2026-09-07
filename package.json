@@ -17,7 +17,9 @@
     "setup:icons": "node scripts/make-icons.mjs",
     "setup": "npm run setup:ocr && npm run setup:icons",
     "verify:browser": "node scripts/verify-in-browser.mjs",
-    "verify:offline": "node scripts/verify-in-browser.mjs --offline"
+    "verify:offline": "node scripts/verify-in-browser.mjs --offline",
+    "verify:journey": "node scripts/verify-journey.mjs",
+    "verify:journey:dev": "node scripts/verify-journey.mjs --dev"
   },
   "dependencies": {
     "react": "^19.2.8",
