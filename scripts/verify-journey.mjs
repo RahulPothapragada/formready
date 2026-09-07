@@ -114,7 +114,7 @@ function makeSourcePng() {
 
 async function attach(url) {
   const tab = await (
-    await fetch(`http://localhost:${CDP_PORT}/json/new?${encodeURIComponent(url)}`, {
+    await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?${encodeURIComponent(url)}`, {
       method: 'PUT',
     })
   ).json();
@@ -518,7 +518,7 @@ try {
     DEV
       ? ['vite', '--port', String(PORT), '--strictPort']
       : ['vite', 'preview', '--port', String(PORT), '--strictPort'],
-    { stdio: 'ignore' },
+    { stdio: 'ignore', shell: process.platform === 'win32' },
   );
 
   const startedAt = Date.now();
@@ -546,7 +546,7 @@ try {
   const chromeStartedAt = Date.now();
   while (Date.now() - chromeStartedAt < 30000) {
     try {
-      if ((await fetch(`http://localhost:${CDP_PORT}/json/version`)).ok) break;
+      if ((await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).ok) break;
     } catch {
       /* not up yet */
     }

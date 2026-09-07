@@ -15,8 +15,19 @@
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.375rem;
-  letter-spacing: -0.02em;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--text);
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .app-header h1 {
+    background: linear-gradient(135deg, var(--text), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
 }
 
 .tagline {
@@ -43,9 +54,25 @@
 
 .step-progress li {
   flex: 1;
+  position: relative;
+}
+
+/* Connecting line drawn behind each step's circle, so the stepper reads as
+   one continuous path rather than a row of unrelated dots. */
+.step-progress li:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  top: 1.1rem;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border);
+  z-index: 0;
 }
 
 .step-progress a {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -60,14 +87,15 @@
 .step-progress .step-number {
   display: grid;
   place-items: center;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.7rem;
+  height: 1.7rem;
   border-radius: 50%;
+  background: var(--bg);
   border: 1.5px solid var(--border);
   font-size: 0.75rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .step-progress li[aria-current='step'] a {
@@ -76,9 +104,10 @@
 }
 
 .step-progress li[aria-current='step'] .step-number {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: var(--accent);
   color: var(--accent-ink);
+  box-shadow: 0 0 0 4px var(--accent-wash);
 }
 
 .page {
@@ -154,17 +183,27 @@ button {
   border-radius: 0.625rem;
   background: var(--surface);
   font-weight: 500;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--border-strong);
 }
 
 button:active { transform: translateY(1px); }
 
 button.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: var(--accent);
   color: var(--accent-ink);
   font-weight: 600;
   box-shadow: var(--shadow);
+}
+
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-hover), var(--accent));
+  border-color: var(--accent-hover);
+  box-shadow: var(--shadow-lg);
 }
 
 /* The main action on each screen stays reachable without scrolling back.
@@ -277,7 +316,9 @@ button.link {
   border-left: 4px solid var(--border);
   border-radius: var(--radius);
   padding: 0.875rem;
-  background: var(--bg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .requirement.confirmed {
@@ -405,6 +446,7 @@ button.link {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .metadata dt {
@@ -437,6 +479,7 @@ button.link {
   border-left: 4px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .checklist li.pass {
@@ -514,11 +557,12 @@ button.link {
 .done {
   border: 1px solid var(--pass);
   background: var(--surface);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .done p { margin: 0; }
@@ -533,11 +577,13 @@ button.link {
 .crop-editor,
 .add-requirement {
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 0.875rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
 }
 
 .crop-editor h3,
