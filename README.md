@@ -78,16 +78,25 @@ confirmation outright.
 
 ```bash
 npm install
+npm run setup      # fetch OCR assets, generate PWA icons
 npm run dev        # http://localhost:5173
 npm run check      # typecheck + lint + tests
 ```
 
 ### OCR assets
 
-Tesseract assets are served from this app's own origin so the offline path is
-real. Populate `public/models/tesseract/` before relying on offline operation —
-see [`public/models/tesseract/README.md`](public/models/tesseract/README.md).
-Pointing these at a CDN would silently break FR-15.
+`npm run setup:ocr` copies the Tesseract core out of `node_modules` and
+downloads `tessdata_fast` English data into `public/models/tesseract/` (~15 MB
+on disk; a given device downloads one 3.7 MB core build, not all three). They
+are not committed — they are large binaries with their own licences that change
+with the tesseract.js version.
+
+Serving them from our own origin is what makes the offline path real. A CDN
+would work in development and fail the moment the phone loses signal.
+
+They are **not** precached: spending ~8 MB on a first visit that may never use
+OCR is the wrong trade on mobile data. They are cached on first use instead,
+which is exactly what FR-15 describes — "after assets are cached".
 
 ## Repository layout
 
@@ -118,9 +127,16 @@ Implemented and covered by tests:
 - Pattern-based rule extraction with source spans and ambiguity reporting
 - Bounded candidate search with JPEG bisection and typed failure kinds
 
-Implemented but not yet device-tested:
+Verified in a real browser (headless Chrome), but not yet on a phone:
 
-- OCR worker wiring, image decode/render/encode, all four screens, export
+- OCR end to end, including offline. All five key tokens read from rendered
+  instruction text; cold 190-600 ms, warm 74 ms.
+- The offline claim: assets cached on first use, network cut, OCR and
+  preparation still work.
+
+Implemented but not yet browser- or device-tested:
+
+- All four screens and the export flow
 - **Preparation worker.** Decode, render, search, and verification all run off
   the main thread, so progress and Cancel stay responsive (NFR-03). Verified in
   a browser: the same 12 MP preparation blocks the main thread for 90 ms inline
@@ -140,7 +156,6 @@ Not started:
 
 - Crop editor as a touch overlay (currently numeric inputs)
 - Held-out evaluation set and the results table
-- PWA icons and precached OCR assets
 
 Deliberately excluded from v1: PDFs, accounts, batch mode, payments, native NPU
 integration, automatic portal submission, and any claim of guaranteed
@@ -156,8 +171,21 @@ The suites run in Node with no browser. The candidate search is tested against a
 synthetic encoder that models JPEG size as a function of pixels and quality, and
 PNG as a function of pixels alone — which is what makes PNG size limits hard.
 
-Browser-dependent paths (decode, render, encode, download) need device testing
-and are not covered here — that is what `/feasibility` is for.
+Browser-dependent paths — decode, render, encode, OCR, the service worker —
+cannot run in Node. They are covered by driving a real browser instead:
+
+```bash
+npm run build
+npm run verify:browser   # runs the probe suite in headless Chrome
+npm run verify:offline   # loads online, cuts the network, re-runs
+```
+
+`verify:offline` is the honest test of FR-15: it loads the app once so the
+service worker caches its assets, cuts the network at the browser level, then
+reloads and re-runs. OCR, preparation, and export all still pass.
+
+Both are desktop smoke tests. Neither is evidence about the phone — for that,
+open `/feasibility` on the device:
 
 ```bash
 npm run dev   # then open /feasibility on the phone, not the laptop

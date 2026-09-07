@@ -142,6 +142,37 @@ export async function makeTestImage(
   return encode(canvas, format, 0.85);
 }
 
+/**
+ * Renders known instruction text, so the OCR probe can check what came back
+ * rather than only how long it took. Black on white at a size close to a real
+ * screenshot of a form's upload rules.
+ */
+export async function makeTextImage(lines: string[]): Promise<Blob> {
+  const width = 900;
+  const height = 90 + lines.length * 64;
+  const canvas =
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : Object.assign(document.createElement('canvas'), { width, height });
+
+  const context = canvas.getContext('2d') as
+    | OffscreenCanvasRenderingContext2D
+    | CanvasRenderingContext2D
+    | null;
+  if (!context) throw new Error('2D canvas context unavailable.');
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#000000';
+  context.font = '40px sans-serif';
+  context.textBaseline = 'top';
+  lines.forEach((line, index) => context.fillText(line, 40, 40 + index * 64));
+
+  // PNG: JPEG artefacts around glyph edges would measure the codec rather than
+  // the OCR engine.
+  return encode(canvas, 'png');
+}
+
 function environmentProbe(): ProbeResult {
   const nav = navigator as Navigator & { deviceMemory?: number };
   const measurements: Measurement[] = [
@@ -407,17 +438,35 @@ async function orientationProbe(): Promise<ProbeResult> {
   }
 }
 
+const OCR_PROBE_ASSET = '/models/tesseract/worker.min.js';
+
 /**
- * Are the locally-served Tesseract assets actually installed?
+ * Are the locally-served Tesseract assets available to this device?
  *
- * A plain `response.ok` check is not enough: this is a single-page app, so a
- * missing path is answered by the SPA fallback with `200 text/html`. That would
- * report the assets as present and turn a setup problem into a spurious OCR
- * failure, so the content type is what actually gets checked.
+ * Cache Storage is consulted first, and that ordering is the whole point: the
+ * service worker caches these on first use, so once they are cached the assets
+ * are available whether or not there is a network. Asking the network first
+ * would report "not installed" exactly when the app is offline — which is the
+ * one situation the offline claim is about.
+ *
+ * The network fallback checks the content type rather than `response.ok`: this
+ * is a single-page app, so a missing file is answered by the SPA fallback with
+ * `200 text/html`, which would turn a setup problem into a spurious OCR
+ * failure.
  */
 async function ocrAssetsPresent(): Promise<boolean> {
+  const url = new URL(OCR_PROBE_ASSET, location.origin).toString();
+
+  if ('caches' in window) {
+    try {
+      if (await caches.match(url)) return true;
+    } catch {
+      // Cache Storage unavailable (private mode, say) — fall through.
+    }
+  }
+
   try {
-    const response = await fetch('/models/tesseract/worker.min.js', { method: 'HEAD' });
+    const response = await fetch(url, { method: 'HEAD' });
     if (!response.ok) return false;
     return !(response.headers.get('content-type') ?? '').includes('text/html');
   } catch {
@@ -445,7 +494,15 @@ async function ocrProbe(signal?: AbortSignal): Promise<ProbeResult> {
     };
   }
 
-  const image = await makeTestImage(900, 400, 'png');
+  const lines = [
+    'Photograph must be in JPEG format',
+    'File size should be under 50 KB',
+    'Dimensions 200 x 230 pixels',
+  ];
+  // Words worth finding: the numbers and units the rule extractor keys on. If
+  // OCR loses these, extraction has nothing to work with.
+  const expected = ['JPEG', '50', 'KB', '200', '230'];
+  const image = await makeTextImage(lines);
 
   try {
     const coldAt = performance.now();
@@ -456,17 +513,26 @@ async function ocrProbe(signal?: AbortSignal): Promise<ProbeResult> {
     await recognize(image, { jobId: `probe-warm-${performance.now()}`, signal });
     const warmMs = performance.now() - warmAt;
 
+    const found = expected.filter((token) => cold.text.includes(token));
+    const readable = found.length === expected.length;
+
     return {
       id: 'ocr',
       label: 'OCR cold start and warm run',
-      status: 'pass',
-      detail:
-        'Cold includes worker start, WASM compilation, and language data. Report these two numbers separately — never quote the warm one as a first-run figure.',
+      status: readable ? 'pass' : 'fail',
+      detail: readable
+        ? 'Cold includes worker start, WASM compilation, and language data. Report these two numbers separately — never quote the warm one as a first-run figure.'
+        : `OCR ran but lost text the rule extractor depends on. Missing: ${expected
+            .filter((token) => !found.includes(token))
+            .join(', ')}. The pasted-text path has to carry more weight here.`,
       measurements: [
         { label: 'Cold run', value: ms(coldMs) },
         { label: 'Warm run', value: ms(warmMs) },
-        { label: 'Characters returned', value: String(cold.text.trim().length) },
+        { label: 'Key tokens found', value: `${found.length} of ${expected.length}` },
         { label: 'Word boxes returned', value: String(cold.words.length) },
+        // A clean render is the best case. Real screenshots are compressed and
+        // low-contrast, so this is a ceiling on accuracy, not an estimate of it.
+        { label: 'Source', value: 'clean rendered text — best case, not a real screenshot' },
       ],
     };
   } catch (error) {

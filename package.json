@@ -12,7 +12,12 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "setup:ocr": "node scripts/setup-ocr-assets.mjs",
+    "setup:icons": "node scripts/make-icons.mjs",
+    "setup": "npm run setup:ocr && npm run setup:icons",
+    "verify:browser": "node scripts/verify-in-browser.mjs",
+    "verify:offline": "node scripts/verify-in-browser.mjs --offline"
   },
   "dependencies": {
     "react": "^19.2.8",

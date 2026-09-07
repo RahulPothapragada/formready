@@ -37,12 +37,20 @@ let activeJobId: string | null = null;
 
 async function getWorker(jobId: string): Promise<Worker> {
   if (worker) return worker;
+  // Absolute URLs, not root-relative ones. tesseract.js loads its own worker
+  // through a blob: URL, and `importScripts` inside a blob worker has an opaque
+  // base, so "/models/..." fails to resolve. Same origin either way, so the
+  // service worker still caches them; see scripts/setup-ocr-assets.mjs for why
+  // a CDN would break FR-15.
+  const base = self.location.origin;
+
+  // OEM 1 is LSTM-only, matching the LSTM core builds the setup script installs.
   worker = await createWorker('eng', 1, {
-    workerPath: '/models/tesseract/worker.min.js',
-    corePath: '/models/tesseract/',
-    langPath: '/models/tesseract/lang',
-    // tessdata-fast keeps the offline bundle to a few MB rather than ~20 MB.
-    gzip: true,
+    workerPath: `${base}/models/tesseract/worker.min.js`,
+    corePath: `${base}/models/tesseract/`,
+    langPath: `${base}/models/tesseract/lang`,
+    // The installed language data is tessdata_fast, uncompressed.
+    gzip: false,
     logger: (message) => {
       if (activeJobId !== jobId) return;
       post({

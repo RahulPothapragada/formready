@@ -13,9 +13,8 @@ journey — navigate to it directly.
    A desktop run only checks that the harness itself works; it is not evidence
    about the device.
 2. Unplug. Debuggers and charging both change thermal and CPU behaviour.
-3. Install the Tesseract assets first
-   (see [`public/models/tesseract/README.md`](../public/models/tesseract/README.md)),
-   or the OCR probe reports `skipped` rather than a timing.
+3. Install the Tesseract assets first with `npm run setup:ocr`, or the OCR
+   probe reports `skipped` rather than a timing.
 4. Run with slow probes enabled. Copy the JSON report and paste it below.
 5. Record the device model and whether the run was cold or warm — the harness
    cannot know either.
@@ -25,7 +24,7 @@ journey — navigate to it directly.
 The harness was driven once in headless Chrome 152 on macOS to prove it runs and
 reports honestly. **These numbers say nothing about the phone** — a laptop has
 more memory, a different codec build, and no thermal limit. They are recorded
-only because the run found two real defects:
+only because the runs found four real defects:
 
 - The geometry ladder bottomed out at 53% linear size, so a 12 MP source could
   never reach a 50 KB target. It exhausted all 24 attempts and reported
@@ -35,6 +34,13 @@ only because the run found two real defects:
 - The OCR asset check trusted `response.ok`, but this is a single-page app, so
   the SPA fallback answers a missing file with `200 text/html`. A setup problem
   was being reported as an OCR failure.
+- OCR could not start at all: tesseract.js loads its own worker through a
+  `blob:` URL, and `importScripts` inside a blob worker has an opaque base, so
+  the root-relative `/models/tesseract/...` paths failed to resolve. They are
+  absolute now.
+- The asset check itself was network-dependent, so with the network cut it
+  reported "assets not installed" — precisely when the offline claim matters.
+  Cache Storage is now consulted before the network.
 
 Desktop results, for reference only: 24 MP decode ceiling, JPEG size monotonic
 across six quality steps, PNG identical at quality 0.1 and 0.95 (753,626 bytes
@@ -48,7 +54,18 @@ identical 48,466-byte 750×1000 output in 13 attempts:
 | Inline (happy-path probe) | 90 ms |
 | Through the worker | 18 ms — one frame |
 
-Read that gap as a floor, not a result. A laptop encodes a 12 MP image in a
+OCR, on cleanly rendered instruction text (best case, not a real screenshot):
+cold 190–600 ms, warm 74 ms, all five key tokens read. A phone will be several
+times slower, and a compressed low-contrast screenshot slower and less accurate
+still.
+
+**The offline path is verified**, by `npm run verify:offline`: the app is loaded
+once online so the service worker caches its assets, the network is then cut at
+the browser level, and the page is reloaded. OCR, preparation, and export all
+still pass. The first load and the offline run are reported as two separate
+passes, which is what NFR-06 asks for.
+
+Read the main-thread gap as a floor, not a result. A laptop encodes a 12 MP image in a
 fraction of the time a phone does, so 90 ms inline is low enough that the
 desktop run would have *passed* the 200 ms responsiveness threshold. The
 problem the worker solves is only visible on the device, which is the whole

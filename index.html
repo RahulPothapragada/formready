@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1d4ed8" />
+    <!-- Without these the browser falls back to requesting /favicon.ico, which
+         does not exist and shows up as a 404 in every console. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta
       name="description"
       content="FormReady helps you read upload instructions, prepare a document, and check the file before you submit it."
