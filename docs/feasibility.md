@@ -83,11 +83,11 @@ happen on the demo phone.
 
 | | |
 | --- | --- |
-| Date | _not run_ |
-| Device | _not run_ |
-| OS / browser | _not run_ |
-| On battery | _not run_ |
-| Assets cached | _not run_ |
+| Date | 2026-09-07 |
+| Device | Android phone, 8 logical cores, 8 GB memory (browser-reported), viewport 384×797 CSS px @3.75 DPR |
+| OS / browser | Android 10, Chrome Mobile 152 (`Mozilla/5.0 (Linux; Android 10; K) ... Chrome/152.0.0.0 Mobile Safari/537.36`) |
+| On battery | not recorded — run again unplugged before a demo if this run was on charger |
+| Assets cached | yes — OCR core + language data installed via the deployed build |
 
 ## What each probe decides
 
@@ -120,10 +120,28 @@ the ones worth watching:
 
 ## Results
 
-_Paste the JSON report here after the run._
+All probes passed on the phone. Full JSON report:
 
 ```json
+{
+  "capturedAt": "2026-09-07T10:25:47.910Z",
+  "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36",
+  "results": [
+    { "id": "environment", "status": "pass", "measurements": { "viewport": "384 × 797 CSS px", "dpr": 3.75, "cores": 8, "memory": "8 GB", "offscreenCanvas": true, "serviceWorker": true } },
+    { "id": "orientation", "status": "pass", "detail": "4×2 orientation-6 source decoded as 2×4, matching expected visual coordinates." },
+    { "id": "png-quality-noop", "status": "pass", "detail": "PNG at quality 0.1 and 0.95 both produced 753,626 bytes — geometry is the only PNG size lever." },
+    { "id": "jpeg-monotonicity", "status": "pass", "measurements": { "q0.2": 204197, "q0.35": 332184, "q0.5": 423938, "q0.65": 489944, "q0.8": 650220, "q0.95": 1035898, "meanEncodeMs": 21 } },
+    { "id": "export", "status": "pass", "measurements": { "anchorDownload": "supported", "webShareWithFiles": "supported", "probeFileBytes": 35073 } },
+    { "id": "accelerator", "status": "pass", "measurements": { "webgpuApi": true, "webAssembly": true, "sharedArrayBuffer": false, "webgpuAdapter": true } },
+    { "id": "decode-ceiling", "status": "pass", "measurements": { "ceilingMp": 24, "12MP": "encode 687ms, decode 114ms, 8.32 MiB", "24MP": "encode 969ms, decode 212ms, 16.68 MiB" } },
+    { "id": "happy-path", "status": "pass", "measurements": { "totalElapsedMs": 2456, "attempts": 13, "targetMs": 15000, "longestMainThreadGapMs": 104, "outputBytes": 48492, "outputDims": "750×1000" } },
+    { "id": "worker-responsiveness", "status": "pass", "measurements": { "longestMainThreadGapMs": 17, "framesObserved": 48, "totalElapsedMs": 805 } },
+    { "id": "ocr", "status": "pass", "measurements": { "coldMs": 1897, "warmMs": 94, "keyTokensFound": "5 of 5", "wordBoxes": 18, "source": "clean rendered text — best case, not a real screenshot" } }
+  ]
+}
 ```
+
+An earlier capture the same day (`Chrome/152 ... Windows NT 10.0; Win64; x64`, 16 cores, 16 GB) was a desktop run made by mistake and is discarded — kept here only as a reminder that the User Agent must be checked before trusting a report as device evidence.
 
 ## Scope-freeze decisions
 
@@ -133,13 +151,13 @@ package 1, and work package 2 should not start while a blocking row is open.
 
 | Question | Answer | Blocking |
 | --- | --- | --- |
-| What megapixel guardrail should the picker enforce? | | |
-| Can the candidate search bisect on JPEG quality? | | |
-| Is the crop editor safe to build against decoded coordinates? | | |
-| Is the local OCR path viable on this device? | | |
-| Does the warm happy path meet the 15-second target? | | |
-| Should the optional browser language model be built (P1)? | | |
-| Does export work on this browser? | | |
+| What megapixel guardrail should the picker enforce? | Lowered `MAX_INPUT_PIXELS` from 20 MP to 18 MP (75% of the 24 MP measured ceiling) — see `services/imageCodec.ts`. | Was blocking; now resolved. |
+| Can the candidate search bisect on JPEG quality? | Yes — size rose monotonically across all six tested quality steps. | No |
+| Is the crop editor safe to build against decoded coordinates? | Yes — decode applies EXIF orientation before handoff. | No |
+| Is the local OCR path viable on this device? | Yes. Cold 1897 ms, warm 94 ms — quoted separately, never warm as first-run. | No |
+| Does the warm happy path meet the 15-second target? | Yes — 2456 ms measured (12 MP source, inline). | No |
+| Should the optional browser language model be built (P1)? | Eligible, not approved. WebGPU adapter present, but that's necessary not sufficient — needs a real model-load + first-token test before committing hours. | No |
+| Does export work on this browser? | Anchor download and Web Share both supported by the API. Still needs a by-hand check that a downloaded file opens in another app (FR-13) — the probe can't verify that. | No |
 
 ## Rules for reading these numbers
 

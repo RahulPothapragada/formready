@@ -7,9 +7,15 @@
 
 import type { CropRect, ImageFormat } from '../domain/types';
 
-/** Guardrails from section 3. Re-measure on the target phone before release. */
+/**
+ * Guardrails from section 3. Measured on the target phone (Android 10, 8
+ * cores/8GB, Chrome Mobile) via /feasibility on 2026-09-07: decode ceiling was
+ * 24 MP with nothing else running. A live session also holds the OCR worker
+ * and preview bitmaps, so the shipped limit is set below the measured
+ * ceiling rather than at it. See docs/feasibility.md.
+ */
 export const MAX_INPUT_BYTES = 10 * 1024 * 1024;
-export const MAX_INPUT_PIXELS = 20_000_000;
+export const MAX_INPUT_PIXELS = 18_000_000;
 
 const MIME_BY_FORMAT: Record<ImageFormat, string> = {
   jpeg: 'image/jpeg',
