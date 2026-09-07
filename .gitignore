@@ -31,3 +31,5 @@ coverage
 # See public/models/tesseract/README.md
 public/models/tesseract/*
 !public/models/tesseract/README.md
+
+.vercel
