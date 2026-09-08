@@ -1,4 +1,12 @@
-import { blobToDataUrl, deleteVaultItem, listVaultItems, saveVaultItem, type VaultItem } from './vault';
+import { blobToDataUrl } from './dataUrl';
+import {
+  deleteVaultItem,
+  listVaultItems,
+  readVaultDocument,
+  saveVaultItem,
+  VaultLockedError,
+  type VaultItemMeta,
+} from './vault';
 import {
   getUnlockedVault,
   hasVault,
@@ -17,12 +25,16 @@ const labelInput = document.getElementById('label') as HTMLInputElement;
 const kindInput = document.getElementById('kind') as HTMLSelectElement;
 const fileInput = document.getElementById('file') as HTMLInputElement;
 
-function renderItem(item: VaultItem): HTMLDivElement {
+function renderItem(item: VaultItemMeta): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'item';
 
+  // The thumbnail is decrypted on demand rather than held in the listing,
+  // so a locked vault shows nothing and an open one costs one read per row.
   const img = document.createElement('img');
-  img.src = item.dataUrl;
+  void readVaultDocument(item.id).then((dataUrl) => {
+    img.src = dataUrl;
+  });
   row.appendChild(img);
 
   const meta = document.createElement('div');
@@ -49,9 +61,26 @@ function renderItem(item: VaultItem): HTMLDivElement {
 }
 
 async function refresh(): Promise<void> {
-  const items = await listVaultItems();
   listEl.innerHTML = '';
+  let items: VaultItemMeta[];
+  try {
+    items = await listVaultItems();
+  } catch (error) {
+    // Documents are encrypted under the vault passphrase now, so there is
+    // nothing to show until it is unlocked. Say which tab does that rather
+    // than showing an empty list that looks like lost data.
+    emptyEl.hidden = false;
+    emptyEl.textContent =
+      error instanceof VaultLockedError
+        ? 'Vault locked — unlock it under "Profile & keys" to see your saved documents.'
+        : `Could not read the vault: ${error instanceof Error ? error.message : String(error)}`;
+    form.hidden = true;
+    return;
+  }
+
+  form.hidden = false;
   emptyEl.hidden = items.length > 0;
+  emptyEl.textContent = 'No documents saved yet.';
   for (const item of items) {
     listEl.appendChild(renderItem(item));
   }
@@ -62,11 +91,20 @@ form.addEventListener('submit', async (event) => {
   const file = fileInput.files?.[0];
   if (!file) return;
   const dataUrl = await blobToDataUrl(file);
-  await saveVaultItem({
-    label: labelInput.value.trim() || file.name,
-    kind: kindInput.value as VaultItem['kind'],
-    dataUrl,
-  });
+  try {
+    await saveVaultItem({
+      label: labelInput.value.trim() || file.name,
+      kind: kindInput.value as VaultItemMeta['kind'],
+      dataUrl,
+    });
+  } catch (error) {
+    emptyEl.hidden = false;
+    emptyEl.textContent =
+      error instanceof VaultLockedError
+        ? 'Unlock the vault under "Profile & keys" before saving a document — documents are encrypted with that passphrase.'
+        : `Could not save: ${error instanceof Error ? error.message : String(error)}`;
+    return;
+  }
   form.reset();
   await refresh();
 });
@@ -98,7 +136,6 @@ const profileForm = document.getElementById('profile-form') as HTMLFormElement;
 const setupForm = document.getElementById('setup-form') as HTMLFormElement;
 const setupPassphraseInput = document.getElementById('setup-passphrase') as HTMLInputElement;
 const lockNowButton = document.getElementById('lock-now') as HTMLButtonElement;
-const apiKeyInput = document.getElementById('pf-apiKey') as HTMLInputElement;
 
 /** Held only for the lifetime of this popup document — never persisted. */
 let sessionPassphrase: string | null = null;
@@ -107,9 +144,8 @@ function profileInput(key: ProfileFieldKey): HTMLInputElement {
   return document.getElementById(`pf-${key}`) as HTMLInputElement;
 }
 
-function fillProfileForm(profile: Profile, apiKey: string | undefined) {
+function fillProfileForm(profile: Profile) {
   for (const key of PROFILE_FIELD_KEYS) profileInput(key).value = profile[key] ?? '';
-  apiKeyInput.value = apiKey ?? '';
 }
 
 function readProfileForm(): Profile {
@@ -129,7 +165,7 @@ async function refreshProfilePanel(): Promise<void> {
     unlockForm.hidden = true;
     setupForm.hidden = true;
     profileForm.hidden = false;
-    fillProfileForm(unlocked.profile, unlocked.apiKey);
+    fillProfileForm(unlocked.profile);
     return;
   }
 
@@ -149,6 +185,7 @@ unlockForm.addEventListener('submit', async (event) => {
     sessionPassphrase = unlockPassphraseInput.value;
     unlockPassphraseInput.value = '';
     await refreshProfilePanel();
+    await refresh();
   } catch {
     lockStatusEl.textContent = 'Wrong passphrase.';
     lockStatusEl.className = 'lock-status locked';
@@ -161,6 +198,7 @@ setupForm.addEventListener('submit', async (event) => {
   await saveVaultSecrets({ profile: {} }, sessionPassphrase);
   setupPassphraseInput.value = '';
   await refreshProfilePanel();
+  await refresh();
 });
 
 profileForm.addEventListener('submit', async (event) => {
@@ -174,10 +212,7 @@ profileForm.addEventListener('submit', async (event) => {
     unlockForm.hidden = false;
     return;
   }
-  await saveVaultSecrets(
-    { profile: readProfileForm(), apiKey: apiKeyInput.value.trim() || undefined },
-    sessionPassphrase,
-  );
+  await saveVaultSecrets({ profile: readProfileForm() }, sessionPassphrase);
   lockStatusEl.textContent = 'Saved.';
 });
 
@@ -185,6 +220,7 @@ lockNowButton.addEventListener('click', async () => {
   await lockVault();
   sessionPassphrase = null;
   await refreshProfilePanel();
+  await refresh();
 });
 
 refreshProfilePanel();

@@ -168,8 +168,9 @@
         <button type="submit">Save to vault</button>
       </form>
       <p class="footnote">
-        Stored in this browser profile only, via chrome.storage.local. Nothing here is uploaded to
-        any server — that's what makes "attach compliant file" safe to do automatically.
+        Stored in this browser profile only, encrypted with your vault passphrase. Nothing here is
+        uploaded to any server — that's what makes "attach compliant file" safe to do automatically.
+        Unlock under "Profile &amp; keys" to see or add documents.
       </p>
     </div>
 
@@ -196,9 +197,6 @@
         <input type="text" id="pf-district" placeholder="District" />
         <input type="text" id="pf-state" placeholder="State" />
         <input type="text" id="pf-pincode" placeholder="Pincode" />
-
-        <div class="field-label">Anthropic API key (for the AI form-reading fallback)</div>
-        <input type="password" id="pf-apiKey" placeholder="sk-ant-..." />
 
         <div class="btn-row">
           <button type="submit" class="btn">Save (encrypted)</button>

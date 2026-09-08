@@ -11,9 +11,8 @@ file inputs anymore but for the whole form.
 
 **The pitch:** instead of screenshotting instructions into a separate app and
 retyping your details into every portal, click one button. It reads the
-requirements straight from the page, fills what it's confident about, asks a
-vision model to double-check anything ambiguous, shows you a final draft to
-approve, then writes everything in — Aadhaar, PAN, address, photo, signature,
+requirements straight from the page, fills what it's confident about, shows
+you a final draft to approve, then writes everything in — Aadhaar, PAN, address, photo, signature,
 and format-converted documents alike. Nothing is written into the real form
 until you confirm the draft.
 
@@ -21,19 +20,25 @@ until you confirm the draft.
 
 - **Whole-form scan**: every text/tel/email/date/select field in a form gets
   classified (`fieldClassifier.ts`), not just file inputs.
-- **Encrypted PII vault**: name, Aadhaar, PAN, address, city, district,
-  state, pincode — AES-256-GCM, key derived from a passphrase via PBKDF2
-  (`crypto.ts`, `profile.ts`). The decrypted copy lives only in
+- **Encrypted vault, PII and documents alike**: name, Aadhaar, PAN, address,
+  city, district, state, pincode — *and* every saved photo and signature —
+  AES-256-GCM, key derived from a passphrase via PBKDF2 (`crypto.ts`,
+  `profile.ts`, `vault.ts`). Documents are encrypted one record at a time
+  under a random document key that the passphrase wraps, so listing a vault
+  costs one key derivation rather than one per document, and a document's
+  label is inside the ciphertext too. A test scans everything written to
+  `chrome.storage.local` for the raw bytes, because encryption applied on
+  one code path and skipped on another still passes a round-trip test. The decrypted copy lives only in
   `chrome.storage.session` (RAM, cleared when the browser closes); the
   encrypted copy in `chrome.storage.local` is the only thing that touches
   disk. Never handed to the content script running on the page — only the
-  background service worker and the popup ever see it decrypted.
-- **Vision fallback**: when DOM heuristics aren't confident about a field, a
-  screenshot of the blank form (never a filled-in value, never actual PII)
-  goes to Claude (`claude-sonnet-5`) for a second opinion, using your own
-  API key (entered once in the popup, encrypted the same way as the PII
-  vault). This is the only network call anywhere in FormReady — everything
-  else stays fully offline.
+  background service worker and the popup ever see it decrypted; the content
+  script asks for a document by id and gets one back only after you pick it.
+- **No network calls at all**: field identification is DOM-only. A field the
+  classifier can't identify is left for you to type yourself. The earlier
+  build screenshotted the page and asked a remote model to identify
+  ambiguous fields; that was removed, because a product whose promise is
+  "nothing leaves your device" cannot have a path that uploads your screen.
 - **Format conversion**: if a field only accepts PDF and the vault holds an
   image, it's embedded into a single-page PDF via `pdf-lib` — run in the
   background service worker specifically so a ~1MB library never loads into
@@ -69,9 +74,8 @@ Rebuild after any change to `extension/src/` — Chrome loads the bundled
 
 1. Click the toolbar icon → **Documents** tab: save a photo and a signature
    (any JPEG/PNG works).
-2. **Profile & keys** tab: choose a passphrase to create the vault, fill in
-   whatever personal details you want to test with, and optionally paste an
-   Anthropic API key if you want to see the vision fallback fire.
+2. **Profile & keys** tab: choose a passphrase to create the vault, then fill
+   in whatever personal details you want to test with.
 3. Serve the mock portals:
    ```bash
    npm run extension:demo-portals   # http://localhost:4321
@@ -97,16 +101,14 @@ that hasn't been checked.
   tripping it through `pdf-lib` in a test).
 - **Explicitly out of scope, not silently skipped**: Word/Excel/PPT → PDF
   conversion (no client-side engine can do this correctly). True computer-
-  vision reading of canvas-rendered forms with zero DOM text (the vision
-  fallback confirms field *identity* from a screenshot; it doesn't replace
-  DOM scanning as the primary path). Auto-submitting a filled form — this
+  reading of canvas-rendered forms with zero DOM text — with no remote model
+  in the loop, a field with no DOM signal is a field you fill yourself.
+  Auto-submitting a filled form — this
   never happens, by design.
 - **Shortcut for tonight**: the field classifier is a keyword/autocomplete
   heuristic tested against three mock portals, not the full variety of real
   government/exam site markup. Byte convention for image rules is assumed
-  decimal. No shared backend exists yet, so the vision fallback runs on
-  *your own* Anthropic API key — a real launch needs its own billing/proxy
-  layer, which is a separate project.
+  decimal.
 - **Known sandbox limitation, not a code issue**: this development
   environment's Chrome blocks `--load-extension` from the command line
   (confirmed by asking the "loaded" extension for its own manifest name and

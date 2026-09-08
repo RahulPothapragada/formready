@@ -36,3 +36,6 @@ packages/web/public/models/tesseract/*
 
 # Engine declaration output for project references
 node_modules/.tmp
+
+# TypeScript incremental build state
+*.tsbuildinfo

@@ -13,18 +13,20 @@ import type { ConfirmedRequirements, DocumentKind, ImageFormat, Rule } from '@fo
 import { extractRules } from '@formready/engine';
 import { searchCandidates, type EncodeFn } from '@formready/engine';
 import { asBlob, decode, encode, readFormat, render } from '@formready/browser';
-import { dataUrlToBlob, listVaultItems, type VaultItem } from './vault';
+import { dataUrlToBlob } from './dataUrl';
+import type { VaultItemMeta } from './vault';
 import { fieldRequiresPdfConversion } from './formatConvertRule';
 import type {
   ConvertToPdfMessage,
   ConvertToPdfResponse,
+  ListDocumentsMessage,
+  ListDocumentsResponse,
+  ReadDocumentMessage,
+  ReadDocumentResponse,
   ResolveProfileMessage,
   ResolveProfileResponse,
-  VisionClassifyMessage,
-  VisionClassifyResponse,
 } from './background';
 import { CONFIDENCE_THRESHOLD, classifyField, extractFieldSignals } from './fieldClassifier';
-import type { VisionCandidate } from './visionFallback';
 import { fillFieldSafely, fillSelectByBestMatch } from './reactSafeFill';
 import { showDraftOverlay, type DraftRow } from './draftOverlay';
 import type { Profile, ProfileFieldKey } from './profile';
@@ -35,6 +37,27 @@ import type { Profile, ProfileFieldKey } from './profile';
  * browser visits — that library has no business loading on pages that
  * never touch a PDF field.
  */
+/**
+ * Saved documents are encrypted with a key the content script deliberately
+ * does not have — it runs in an isolated world on every page you visit, and
+ * a page that finds a way into it must not find an Aadhaar photo there. The
+ * background worker holds the key and hands over one document at a time,
+ * only after the user has chosen it.
+ */
+async function listDocuments(): Promise<VaultItemMeta[]> {
+  const message: ListDocumentsMessage = { type: 'formready-list-documents' };
+  const response: ListDocumentsResponse = await chrome.runtime.sendMessage(message);
+  if (!response.ok) throw new Error(response.error);
+  return response.documents;
+}
+
+async function readDocumentBlob(id: string): Promise<Blob> {
+  const message: ReadDocumentMessage = { type: 'formready-read-document', id };
+  const response: ReadDocumentResponse = await chrome.runtime.sendMessage(message);
+  if (!response.ok) throw new Error(response.error);
+  return dataUrlToBlob(response.dataUrl);
+}
+
 async function convertToPdfViaBackground(imageBlob: Blob, format: ImageFormat): Promise<Blob> {
   const message: ConvertToPdfMessage = { type: 'formready-convert-to-pdf', imageBlob, format };
   const response: ConvertToPdfResponse = await chrome.runtime.sendMessage(message);
@@ -167,7 +190,7 @@ function mountUI(input: HTMLInputElement): Mounted {
   return { panel, button };
 }
 
-function renderPicker(panel: HTMLDivElement, items: VaultItem[], onPick: (item: VaultItem) => void) {
+function renderPicker(panel: HTMLDivElement, items: VaultItemMeta[], onPick: (item: VaultItemMeta) => void) {
   panel.hidden = false;
   panel.innerHTML = '';
   const heading = document.createElement('h4');
@@ -201,7 +224,7 @@ async function runPipeline(
   input: HTMLInputElement,
   kind: DocumentKind,
   text: string,
-  item: VaultItem,
+  item: VaultItemMeta,
   panel: HTMLDivElement,
   button: HTMLButtonElement,
 ) {
@@ -213,11 +236,12 @@ async function runPipeline(
     .filter(isUsableRule)
     .map((rule) => ({ ...rule, reviewState: 'confirmed' as const }));
 
+  const sourceBlob = await readDocumentBlob(item.id);
+
   if (confirmedRules.length === 0) {
     const needsPdf = fieldRequiresPdfConversion(input.getAttribute('accept') ?? '');
     const baseName = item.label.replace(/\s+/g, '_');
     if (needsPdf) {
-      const sourceBlob = await dataUrlToBlob(item.dataUrl);
       const sourceFormat = (await readFormat(sourceBlob)) ?? 'jpeg';
       const pdfBlob = await convertToPdfViaBackground(sourceBlob, sourceFormat);
       panel.innerHTML = `
@@ -230,7 +254,7 @@ async function runPipeline(
         <h4 class="fr-fail">No explicit requirements found nearby</h4>
         <div class="fr-note">FormReady looks for size, format, and pixel-dimension rules in the text next to this field and found none it could parse confidently. Attaching "${item.label}" as saved, unmodified.</div>
       `;
-      attachFileToInput(input, await dataUrlToBlob(item.dataUrl), baseName, 'image/jpeg');
+      attachFileToInput(input, sourceBlob, baseName, 'image/jpeg');
     }
     button.disabled = false;
     return;
@@ -245,7 +269,6 @@ async function runPipeline(
   };
 
   try {
-    const sourceBlob = await dataUrlToBlob(item.dataUrl);
     const bitmap = await decode(sourceBlob);
     panel.innerHTML = '<h4>Preparing a compliant file…</h4>';
 
@@ -308,7 +331,7 @@ async function handleClick(input: HTMLInputElement, kind: DocumentKind, text: st
   ui.panel.hidden = false;
   ui.panel.innerHTML = '<h4>Checking your vault…</h4>';
 
-  const items = await listVaultItems();
+  const items = await listDocuments();
   if (items.length === 0) {
     ui.panel.innerHTML = `
       <h4 class="fr-fail">Vault is empty</h4>
@@ -410,28 +433,12 @@ async function classifyFormFields(form: Element): Promise<PlannedTextField[]> {
     }
   });
 
-  if (lowConfidence.length > 0) {
-    try {
-      const candidates: VisionCandidate[] = lowConfidence.map((entry) => ({
-        fieldId: entry.id,
-        domGuess: entry.domGuess,
-        label: entry.label,
-      }));
-      const message: VisionClassifyMessage = { type: 'formready-vision-classify', candidates };
-      const response: VisionClassifyResponse = await chrome.runtime.sendMessage(message);
-      if (response.ok) {
-        const byId = new Map(response.results.map((result) => [result.fieldId, result]));
-        for (const entry of lowConfidence) {
-          const result = byId.get(entry.id);
-          if (result?.confirmedType && result.confidence >= CONFIDENCE_THRESHOLD) {
-            confident.push({ id: entry.id, element: entry.field, fieldLabel: entry.label, profileKey: result.confirmedType });
-          }
-        }
-      }
-    } catch {
-      // No API key, offline, or the call failed — those fields are simply left unfilled.
-    }
-  }
+  // Fields the DOM signals cannot identify are left alone on purpose.
+  // The alternative — screenshotting the page and asking a remote model
+  // what the fields are — sends the user's screen off the device, which
+  // is the one thing this product promises never to do. An unfilled
+  // field costs the user a few seconds of typing; a screenshot upload
+  // costs them the guarantee.
 
   return confident;
 }
@@ -455,7 +462,7 @@ async function handleFillForm(form: Element, status: HTMLDivElement, button: HTM
     const fileInputs = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="file"]')).filter((input) =>
       fileInputMounts.has(input),
     );
-    const vaultItems = fileInputs.length > 0 ? await listVaultItems() : [];
+    const vaultItems = fileInputs.length > 0 ? await listDocuments() : [];
 
     const rows: DraftRow[] = [];
     const textFieldById = new Map<string, PlannedTextField>();
