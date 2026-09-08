@@ -52,6 +52,10 @@ async function findChrome() {
   );
 }
 
+// Vite lives in the web package now, so the dev and preview servers are
+// started from there rather than from the repository root.
+const WEB_PACKAGE = new URL('../packages/web/', import.meta.url).pathname;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitFor(check, { timeoutMs = 30000, label }) {
@@ -155,6 +159,7 @@ async function main() {
 
   preview = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
     stdio: 'ignore',
+    cwd: WEB_PACKAGE,
   });
   await waitFor(
     async () => {

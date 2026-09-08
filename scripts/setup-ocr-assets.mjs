@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const target = join(root, 'public', 'models', 'tesseract');
+const target = join(root, 'packages', 'web', 'public', 'models', 'tesseract');
 
 /**
  * tessdata_fast, not tessdata. Roughly 4 MB against 15–23 MB, and both read
@@ -86,7 +86,7 @@ async function main() {
     process.stdout.write(`  ${name.padEnd(44)} ${megabytes(size).padStart(9)}\n`);
   }
 
-  process.stdout.write(`\nInstalled into public/models/tesseract (${megabytes(total)} total).\n`);
+  process.stdout.write(`\nInstalled into packages/web/public/models/tesseract (${megabytes(total)} total).\n`);
   process.stdout.write(
     'A device downloads one core build, not all three — see docs/feasibility.md\n' +
       'for what a first run actually costs versus later offline operation.\n',

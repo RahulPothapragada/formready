@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           for file in worker.min.js tesseract-core-simd-lstm.wasm.js lang/eng.traineddata; do
-            test -s "public/models/tesseract/$file" \
+            test -s "packages/web/public/models/tesseract/$file" \
               || { echo "Missing OCR asset: $file"; exit 1; }
           done
 

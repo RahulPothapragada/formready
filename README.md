@@ -109,27 +109,54 @@ which is exactly what FR-15 describes — "after assets are cached".
 
 ## Repository layout
 
+A workspace, split by *what each part is allowed to depend on* rather than by
+feature. The boundary is the point: the engine has to run unchanged on a phone,
+so it is a package that cannot import a platform, not a folder that merely
+happens not to.
+
 ```
-src/
-  app/          job reducer, context, routes, shell
-  domain/       types, zod schemas, exact constraint arithmetic
-  features/
-    requirements/  OCR text → evidence-linked rules → confirmation
-    capture/       document picker, crop and rotation approval
-    preparation/   bounded candidate search
-    review/        checklist, visual review, export gate
-    demo/          clearly-labelled demo upload checker
-    feasibility/   device probe harness (work package 1)
-  services/     ocr, imageCodec, verifier, exportFile, modelParser
-  workers/      OCR and preparation workers
-tests/          deterministic suites (no browser required)
-docs/           demo script, evaluation plan
+packages/
+  engine/      Portable core — zero platform imports, enforced by test
+    src/
+      types.ts            what a requirement and a job are
+      constraints.ts      exact arithmetic over bytes and pixels
+      schemas.ts          validation boundary for untrusted proposals
+      naming.ts           output filenames from the decoded format
+      rules/extract.ts    instruction text -> typed constraints
+      geometry/crop.ts    crop maths, incl. rotated-view conversion
+      geometry/fit.ts     output geometry the search plans against
+      search/candidates.ts bounded search for a compliant encoding
+      job/reducer.ts      lifecycle and revision-based invalidation
+      job/snapshot.ts     what may survive a reload
+      media/format.ts     magic-byte format sniffing, input guardrails
+      media/exif.ts       EXIF orientation, written not read
+      index.ts            the only entry point adapters may use
+
+  browser/     Browser platform adapter — fills the engine's imaging seam
+    src/imaging.ts        decode, render, encode via canvas
+    src/verifier.ts       re-reads produced bytes to build the report
+
+  web/         The PWA: screens, workers, storage, feasibility harness
+  extension/   The browser extension: reads a page, hands over a file
 ```
+
+**The seam.** `searchCandidates` takes its encoder as a parameter. The engine
+decides *what size and format* to produce; a platform decides *how*. That single
+injection point is why an Android adapter replaces `packages/browser` and
+nothing else.
+
+**The boundary is enforced, not documented.**
+`packages/engine/tests/enginePurity.test.ts` fails the build if anything in the
+engine reaches for `document`, `window`, `canvas`, `Blob`, `performance`, or any
+other platform global, or imports anything outside its own package. If it fails,
+the fix is to move code into an adapter — not to widen the list.
 
 ## Current state
 
 Implemented and covered by tests:
 
+- **The portability boundary itself** — the engine package is checked against
+  platform globals and cross-package imports on every run
 - Exact constraint arithmetic, including operator semantics, byte conventions,
   and conflict detection
 - Job state machine with revision-based invalidation and the export gate

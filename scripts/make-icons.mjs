@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const target = join(root, 'public', 'icons');
+const target = join(root, 'packages', 'web', 'public', 'icons');
 
 const ACCENT = [29, 78, 216]; // matches --accent in src/index.css
 const WHITE = [255, 255, 255];
@@ -114,4 +114,4 @@ for (const size of [192, 512]) {
   await writeFile(join(target, `icon-${size}.png`), png);
   process.stdout.write(`  icon-${size}.png  ${(png.length / 1024).toFixed(1)} KB\n`);
 }
-process.stdout.write('\nIcons written to public/icons.\n');
+process.stdout.write('\nIcons written to packages/web/public/icons.\n');

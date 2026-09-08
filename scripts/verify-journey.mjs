@@ -38,6 +38,10 @@ const CHROME_CANDIDATES = [
   '/usr/bin/chromium',
 ].filter(Boolean);
 
+// Vite lives in the web package now, so the dev and preview servers are
+// started from there rather than from the repository root.
+const WEB_PACKAGE = new URL('../packages/web/', import.meta.url).pathname;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function findChrome() {
@@ -518,7 +522,7 @@ try {
     DEV
       ? ['vite', '--port', String(PORT), '--strictPort']
       : ['vite', 'preview', '--port', String(PORT), '--strictPort'],
-    { stdio: 'ignore', shell: process.platform === 'win32' },
+    { stdio: 'ignore', shell: process.platform === 'win32', cwd: WEB_PACKAGE },
   );
 
   const startedAt = Date.now();

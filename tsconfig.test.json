@@ -17,5 +17,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["tests"]
+  "include": ["packages/*/tests", "scripts"],
+  "references": [{ "path": "./packages/engine" }, { "path": "./packages/browser" }]
 }

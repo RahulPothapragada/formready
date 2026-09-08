@@ -1,0 +1,15 @@
+{
+  "name": "@formready/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser extension adapter: reads a form in the page and hands over a prepared file.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@formready/engine": "*",
+    "pdf-lib": "^1.17.1",
+    "@formready/browser": "*"
+  }
+}

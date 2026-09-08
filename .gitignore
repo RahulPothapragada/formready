@@ -29,7 +29,10 @@ coverage
 
 # OCR binaries are fetched during setup, not committed.
 # See public/models/tesseract/README.md
-public/models/tesseract/*
-!public/models/tesseract/README.md
+packages/web/public/models/tesseract/*
+!packages/web/public/models/tesseract/README.md
 
 .vercel
+
+# Engine declaration output for project references
+node_modules/.tmp
